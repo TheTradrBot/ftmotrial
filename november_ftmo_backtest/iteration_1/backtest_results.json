@@ -1,0 +1,37 @@
+{
+  "iteration": 1,
+  "passed": true,
+  "phase1": {
+    "passed": true,
+    "profit": 1065.0,
+    "profit_pct": 10.65,
+    "max_daily_loss": 50.0,
+    "max_drawdown": 0.0,
+    "trading_days": 19,
+    "win_rate": 72.0,
+    "total_trades": 25
+  },
+  "params": {
+    "risk_per_trade_pct": 0.5,
+    "min_confluence_score": 5,
+    "min_quality_factors": 2,
+    "tp1_r_multiple": 1.5,
+    "tp2_r_multiple": 3.0,
+    "tp3_r_multiple": 5.0,
+    "max_entry_distance_r": 2.0,
+    "min_sl_atr_ratio": 1.0,
+    "max_sl_atr_ratio": 3.0,
+    "max_concurrent_trades": 3,
+    "daily_loss_halt_pct": 4.2
+  },
+  "phase2": {
+    "passed": true,
+    "profit": 558.7824999999993,
+    "profit_pct": 5.0499999999999945,
+    "max_daily_loss": 60.857499999999845,
+    "max_drawdown": 0.0,
+    "trading_days": 5,
+    "win_rate": 100.0,
+    "total_trades": 6
+  }
+}

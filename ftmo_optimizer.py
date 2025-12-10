@@ -145,10 +145,13 @@ class FTMOBacktestRunner:
     def simulate_challenge(self, backtest_data: Dict, params: OptimizableParams) -> ChallengeResult:
         """
         Simulate the complete FTMO challenge (Phase 1 + Phase 2).
+        
+        Phase 1 runs until profit target is hit or trades are exhausted.
+        Phase 2 uses ONLY trades that occur AFTER Phase 1 completion.
         """
         trades = backtest_data.get('trades', [])
         
-        phase1_result = self._run_phase(
+        phase1_result, phase1_trades_used = self._run_phase_with_tracking(
             trades=trades,
             phase=1,
             starting_balance=self.INITIAL_BALANCE,
@@ -158,16 +161,37 @@ class FTMOBacktestRunner:
         
         phase2_result = None
         if phase1_result.passed:
-            mid_point = len(trades) // 2
-            remaining_trades = trades[mid_point:] if mid_point > 0 else trades
+            remaining_trades = trades[phase1_trades_used:]
             
-            phase2_result = self._run_phase(
-                trades=remaining_trades,
-                phase=2,
-                starting_balance=phase1_result.ending_balance,
-                profit_target_pct=self.PHASE2_PROFIT_TARGET_PCT,
-                params=params,
-            )
+            if remaining_trades:
+                phase2_result, _ = self._run_phase_with_tracking(
+                    trades=remaining_trades,
+                    phase=2,
+                    starting_balance=phase1_result.ending_balance,
+                    profit_target_pct=self.PHASE2_PROFIT_TARGET_PCT,
+                    params=params,
+                )
+            else:
+                phase2_result = PhaseResult(
+                    phase=2,
+                    passed=False,
+                    starting_balance=phase1_result.ending_balance,
+                    ending_balance=phase1_result.ending_balance,
+                    profit=0,
+                    profit_pct=0,
+                    profit_target=phase1_result.ending_balance * 0.05,
+                    max_daily_loss=0,
+                    max_daily_loss_pct=0,
+                    daily_loss_limit=phase1_result.ending_balance * 0.05,
+                    max_drawdown=0,
+                    max_drawdown_pct=0,
+                    drawdown_limit=phase1_result.ending_balance * 0.10,
+                    trading_days=0,
+                    min_trading_days=self.MIN_TRADING_DAYS,
+                    total_trades=0,
+                    win_rate=0,
+                    failure_reasons=["No trades remaining after Phase 1"],
+                )
         
         complete_passed = phase1_result.passed and (phase2_result.passed if phase2_result else False)
         
@@ -186,22 +210,32 @@ class FTMOBacktestRunner:
             config_snapshot=params.to_dict(),
         )
     
-    def _run_phase(
+    def _run_phase_with_tracking(
         self,
         trades: List[Dict],
         phase: int,
         starting_balance: float,
         profit_target_pct: float,
         params: OptimizableParams,
-    ) -> PhaseResult:
-        """Run a single challenge phase and track all FTMO metrics."""
+    ) -> Tuple[PhaseResult, int]:
+        """
+        Run a single challenge phase and track all FTMO metrics.
         
+        FTMO Rules Applied (relative to FIXED phase starting balance):
+        - Daily loss: Max 5% of starting balance
+        - Max drawdown: Max 10% of starting balance  
+        - All calculations use fixed starting balance as reference
+        
+        Returns:
+            Tuple of (PhaseResult, trades_consumed_count)
+        """
         balance = starting_balance
         equity_curve = [balance]
         daily_pnl = {}
         peak_equity = balance
         max_drawdown = 0.0
         trading_days = set()
+        trades_consumed = 0
         
         profit_target = starting_balance * (profit_target_pct / 100)
         daily_loss_limit = starting_balance * (self.MAX_DAILY_LOSS_PCT / 100)
@@ -211,7 +245,7 @@ class FTMOBacktestRunner:
         breached_drawdown = False
         target_reached = False
         
-        for trade in trades:
+        for i, trade in enumerate(trades):
             rr = trade.get('rr', 0)
             entry_date = trade.get('entry_date', '')[:10]
             
@@ -219,10 +253,11 @@ class FTMOBacktestRunner:
                 trading_days.add(entry_date)
             
             pnl_pct = rr * params.risk_per_trade_pct
-            pnl_usd = balance * (pnl_pct / 100)
+            pnl_usd = starting_balance * (pnl_pct / 100)
             
             balance += pnl_usd
             equity_curve.append(balance)
+            trades_consumed = i + 1
             
             if entry_date not in daily_pnl:
                 daily_pnl[entry_date] = 0.0
@@ -231,7 +266,7 @@ class FTMOBacktestRunner:
             if balance > peak_equity:
                 peak_equity = balance
             
-            current_dd = peak_equity - balance
+            current_dd = starting_balance - balance
             if current_dd > max_drawdown:
                 max_drawdown = current_dd
             
@@ -243,7 +278,8 @@ class FTMOBacktestRunner:
                 breached_daily_loss = True
                 break
             
-            if balance >= starting_balance + profit_target:
+            profit = balance - starting_balance
+            if profit >= profit_target:
                 target_reached = True
                 break
         
@@ -255,8 +291,9 @@ class FTMOBacktestRunner:
         max_daily_loss_pct = (max_daily_loss / starting_balance) * 100
         max_drawdown_pct = (max_drawdown / starting_balance) * 100
         
-        wins = sum(1 for t in trades if t.get('rr', 0) > 0)
-        win_rate = (wins / len(trades) * 100) if trades else 0.0
+        trades_processed = trades[:trades_consumed]
+        wins = sum(1 for t in trades_processed if t.get('rr', 0) > 0)
+        win_rate = (wins / len(trades_processed) * 100) if trades_processed else 0.0
         
         failure_reasons = []
         if profit < profit_target:
@@ -275,7 +312,7 @@ class FTMOBacktestRunner:
             len(trading_days) >= self.MIN_TRADING_DAYS
         )
         
-        return PhaseResult(
+        phase_result = PhaseResult(
             phase=phase,
             passed=passed,
             starting_balance=starting_balance,
@@ -291,12 +328,14 @@ class FTMOBacktestRunner:
             drawdown_limit=drawdown_limit,
             trading_days=len(trading_days),
             min_trading_days=self.MIN_TRADING_DAYS,
-            total_trades=len(trades),
+            total_trades=trades_consumed,
             win_rate=win_rate,
             daily_pnl=daily_pnl_list,
             equity_curve=equity_curve,
             failure_reasons=failure_reasons,
         )
+        
+        return phase_result, trades_consumed
 
 
 class ParameterOptimizer:
