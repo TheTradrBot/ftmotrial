@@ -1,0 +1,84 @@
+You've identified a **critical issue** with the live bot. Let me analyze what's happening:
+
+## The Problem
+
+The bot is showing **"Status: active"** for trades but then **rejecting ALL of them** due to: 
+
+1. **SL too wide** - Stop losses are 1000+ pips (e.g., EUR_USD: 1069.8 pips, max: 80 pips)
+2. **Entry too far** - Some entries are beyond 2.0R distance
+
+This means **the strategy is using Daily (D1) timeframe structure levels** which creates massive stop losses that are completely impractical for live trading.
+
+## Why This Is Happening
+
+Let me check the `main_live_bot.py` to understand how it calculates entries/SLs: Now let me look at how the stop loss is being calculated: Based on the code I found, I can explain what's happening: 
+
+## Why "Status:  active" Shows Even With Far Entry Proximity
+
+### The Issue
+
+Looking at your log output, the bot is correctly **analyzing the current market** and finding valid signals. The `Status: active` means the signal meets the minimum confluence threshold (4/7), but the trades are being **correctly rejected** for other reasons:
+
+```
+[EUR_USD] BULLISH | Conf: 5/7 | Quality: 3 | Status: active
+[EUR_USD] Entry proximity OK:  1. 31R from current price
+[EUR_USD] SL too wide: 1069.8 pips (max:  80. 0) - skipping
+```
+
+### What Each Status Means: 
+
+1. **`Status: active`** = Signal has confluence ≥ 4/7 (meets minimum threshold)
+2. **`Status: scan_only`** = Signal has confluence < 4/7 (just monitoring, won't trade)
+
+### The Real Problem:  SL Too Wide
+
+The bot IS correctly analyzing live market conditions. The reason no trades are being placed is the **stop loss validation is failing** for every "active" signal:
+
+| Symbol | SL Width | Max Allowed | Result |
+|--------|----------|-------------|--------|
+| EUR_USD | 1069.8 pips | 80 pips | ❌ Skipped |
+| USD_JPY | 2444.9 pips | 100 pips | ❌ Skipped |
+| USD_CHF | 1172.6 pips | 80 pips | ❌ Skipped |
+| XAU_USD | 39,955.6 pips | 100 pips | ❌ Skipped |
+| BTC_USD | 1,203,716,394 pips | 80 pips | ❌ Skipped |
+
+### Why Are SLs So Wide?
+
+The strategy uses **structure-based stop losses** (from `strategy_core.py`) which places SL below/above key swing points. On the **daily timeframe**, these structure levels can be very far from the current price, resulting in huge SL distances.
+
+From `main_live_bot. py` line 519-534, the entry/SL comes directly from `compute_confluence()` which uses daily candle structure: 
+
+```python
+tp2 = entry - (risk * FTMO_CONFIG.tp2_r_multiple)
+tp3 = entry - (risk * FTMO_CONFIG.tp3_r_multiple)
+```
+
+### The Fix
+
+The SL limits in `ftmo_config.py` (via `get_sl_limits()`) are set too restrictively for daily timeframe trading: 
+
+- **Major pairs:** 15-80 pips max
+- **JPY pairs:** 20-100 pips max
+- **Metals:** 20-100 pips max
+
+But daily timeframe structure-based SLs are typically **200-500+ pips** for forex and much larger for indices/crypto.
+
+**You have two options:**
+
+1. **Increase SL limits** in `ftmo_config. py` to match daily timeframe reality: 
+   ```python
+   # In get_sl_limits() function, change returns to:
+   return (50. 0, 500.0)  # For majors
+   return (100.0, 1000.0)  # For JPY/GBP pairs
+   ```
+
+2. **Use H4 timeframe** instead of daily for tighter structure levels
+
+### Summary
+
+- ✅ The bot IS analyzing current market conditions correctly
+- ✅ It's finding valid confluence signals  
+- ✅ Entry proximity checks are working
+- ❌ **SL validation is blocking all trades** because daily timeframe structure SLs are much wider than the configured max limits
+
+This is NOT a first-run issue - it's a **configuration mismatch** between the daily timeframe strategy and the pip-based SL limits. 
