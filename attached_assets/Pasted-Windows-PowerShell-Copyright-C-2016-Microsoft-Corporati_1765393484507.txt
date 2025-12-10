@@ -1,0 +1,93 @@
+Windows PowerShell
+Copyright (C) 2016 Microsoft Corporation. All rights reserved.
+
+PS C:\Users\Administrator> cd C:\mt5bot-new
+>> python main_live_bot.py
+[config] ✓ Loaded environment from C:\mt5bot-new\.env
+2025-12-10 10:37:02 | INFO     | tradr | Loaded 4 pending setups from file
+2025-12-10 10:37:02 | INFO     | tradr | Challenge already active (Phase 1) - continuing...
+2025-12-10 10:37:02 | INFO     | tradr | ======================================================================
+2025-12-10 10:37:02 | INFO     | tradr | TRADR BOT - LIVE TRADING (FTMO COMPLIANT)
+2025-12-10 10:37:02 | INFO     | tradr | *** CHALLENGE MODE: ELITE PROTECTION ENABLED ***
+2025-12-10 10:37:02 | INFO     | tradr | ======================================================================
+2025-12-10 10:37:02 | INFO     | tradr | Using SAME strategy as backtests (strategy_core.py)
+2025-12-10 10:37:02 | INFO     | tradr | FTMO Risk Limits:
+2025-12-10 10:37:02 | INFO     | tradr |   - Max single trade risk: 0.75% (Challenge Mode)
+2025-12-10 10:37:02 | INFO     | tradr |   - Max cumulative risk: 3.5%
+2025-12-10 10:37:02 | INFO     | tradr |   - Emergency close at: 4.5% daily loss / 8% drawdown
+2025-12-10 10:37:02 | INFO     | tradr |   - Partial TPs: 45% TP1, 30% TP2, 25% TP3 (Challenge Mode)
+2025-12-10 10:37:02 | INFO     | tradr | Server:
+2025-12-10 10:37:02 | INFO     | tradr | Login: 1512190437
+2025-12-10 10:37:02 | INFO     | tradr | Scan Interval: 4 hours
+2025-12-10 10:37:02 | INFO     | tradr | Validate Interval: 15 minutes
+2025-12-10 10:37:02 | INFO     | tradr | P/L Monitor Interval: 30 seconds (elite protection)
+2025-12-10 10:37:02 | INFO     | tradr | Strategy Mode: standard
+2025-12-10 10:37:02 | INFO     | tradr | Min Confluence: 4/7
+2025-12-10 10:37:02 | INFO     | tradr | Symbols: 34
+2025-12-10 10:37:02 | INFO     | tradr | ======================================================================
+2025-12-10 10:37:02 | INFO     | tradr | ======================================================================
+2025-12-10 10:37:02 | INFO     | tradr | CONNECTING TO MT5
+2025-12-10 10:37:02 | INFO     | tradr | ======================================================================
+[MT5] Connected: 1512190437 @ FTMO-Demo
+[MT5] Balance: $9,737.87, Equity: $9,737.87
+2025-12-10 10:37:02 | INFO     | tradr | Connected: 1512190437 @ FTMO-Demo
+2025-12-10 10:37:02 | INFO     | tradr | Balance: $9,737.87
+2025-12-10 10:37:02 | INFO     | tradr | Equity: $9,737.87
+2025-12-10 10:37:02 | INFO     | tradr | Leverage: 1:100
+2025-12-10 10:37:02 | INFO     | tradr |
+======================================================================
+2025-12-10 10:37:02 | INFO     | tradr | DISCOVERING BROKER SYMBOLS
+2025-12-10 10:37:02 | INFO     | tradr | ======================================================================
+2025-12-10 10:37:02 | INFO     | tradr | Broker has 131 total symbols
+2025-12-10 10:37:02 | INFO     | tradr | ✓ EUR_USD         -> EURUSD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ GBP_USD         -> GBPUSD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ USD_JPY         -> USDJPY
+2025-12-10 10:37:02 | INFO     | tradr | ✓ USD_CHF         -> USDCHF
+2025-12-10 10:37:02 | INFO     | tradr | ✓ USD_CAD         -> USDCAD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ AUD_USD         -> AUDUSD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ NZD_USD         -> NZDUSD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ EUR_GBP         -> EURGBP
+2025-12-10 10:37:02 | INFO     | tradr | ✓ EUR_JPY         -> EURJPY
+2025-12-10 10:37:02 | INFO     | tradr | ✓ EUR_CHF         -> EURCHF
+2025-12-10 10:37:02 | INFO     | tradr | ✓ EUR_AUD         -> EURAUD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ EUR_CAD         -> EURCAD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ EUR_NZD         -> EURNZD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ GBP_JPY         -> GBPJPY
+2025-12-10 10:37:02 | INFO     | tradr | ✓ GBP_CHF         -> GBPCHF
+2025-12-10 10:37:02 | INFO     | tradr | ✓ GBP_AUD         -> GBPAUD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ GBP_CAD         -> GBPCAD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ GBP_NZD         -> GBPNZD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ AUD_JPY         -> AUDJPY
+2025-12-10 10:37:02 | INFO     | tradr | ✓ AUD_CHF         -> AUDCHF
+2025-12-10 10:37:02 | INFO     | tradr | ✓ AUD_CAD         -> AUDCAD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ AUD_NZD         -> AUDNZD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ NZD_JPY         -> NZDJPY
+2025-12-10 10:37:02 | INFO     | tradr | ✓ NZD_CHF         -> NZDCHF
+2025-12-10 10:37:02 | INFO     | tradr | ✓ NZD_CAD         -> NZDCAD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ CAD_JPY         -> CADJPY
+2025-12-10 10:37:02 | INFO     | tradr | ✓ CAD_CHF         -> CADCHF
+2025-12-10 10:37:02 | INFO     | tradr | ✓ CHF_JPY         -> CHFJPY
+2025-12-10 10:37:02 | INFO     | tradr | ✓ XAU_USD         -> XAUUSD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ XAG_USD         -> XAGUSD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ BTC_USD         -> BTCUSD
+2025-12-10 10:37:02 | INFO     | tradr | ✓ ETH_USD         -> ETHUSD
+2025-12-10 10:37:02 | WARNING  | tradr | ✗ SPX500_USD      -> NOT FOUND
+2025-12-10 10:37:02 | WARNING  | tradr | ✗ NAS100_USD      -> NOT FOUND
+2025-12-10 10:37:02 | INFO     | tradr | ======================================================================
+2025-12-10 10:37:02 | INFO     | tradr | Mapped 32/34 symbols
+2025-12-10 10:37:02 | INFO     | tradr | ======================================================================
+2025-12-10 10:37:02 | INFO     | tradr | Syncing risk manager with MT5 account...
+2025-12-10 10:37:02 | INFO     | tradr | Risk manager synced: Balance=$9,737.87, Equity=$9,737.87
+2025-12-10 10:37:02 | INFO     | tradr | Initializing Challenge Risk Manager (FTMO 10K COMPLIANT)...
+Traceback (most recent call last):
+  File "C:\mt5bot-new\main_live_bot.py", line 1504, in <module>
+    main()
+  File "C:\mt5bot-new\main_live_bot.py", line 1500, in main
+    bot.run()
+  File "C:\mt5bot-new\main_live_bot.py", line 1395, in run
+    if not self.connect():
+           ^^^^^^^^^^^^^^
+  File "C:\mt5bot-new\main_live_bot.py", line 243, in connect
+    pending_order_max_age_hours=FTMO_CONFIG.pending_order_expiry_hours,
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FTMO10KConfig' object has no attribute 'pending_order_expiry_hours'
