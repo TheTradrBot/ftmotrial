@@ -74,6 +74,8 @@ class FTMO10KConfig:
     ultra_safe_risk_pct: float = 0.25  # Use 0.25% risk in ultra-safe mode
     
     # === ASSET WHITELIST (Top 10 Performers from Backtest) ===
+    # Based on Jan-Nov 2024 backtest with 5/7 confluence filter
+    # Performance metrics: Win Rate (WR%) and average R-multiple
     whitelist_assets: List[str] = field(default_factory=lambda: [
         "EURUSD",  # 91% WR, 3.2R avg
         "GBPUSD",  # 88% WR, 3.1R avg
@@ -109,9 +111,16 @@ class FTMO10KConfig:
         """
         Get risk percentage based on current account state.
         Dynamic risk adjustment based on drawdown levels.
+        
+        Args:
+            daily_loss_pct: Daily loss as positive percentage (e.g., 2.5 means 2.5% loss)
+            total_dd_pct: Total drawdown as positive percentage
+        
+        Returns:
+            Risk percentage to use for next trade
         """
-        # Ultra-safe mode if near profit target
-        if daily_loss_pct < 0:  # In profit
+        # Ultra-safe mode if in daily profit (loss is negative/zero)
+        if daily_loss_pct <= 0:  # In profit or breakeven
             return self.ultra_safe_risk_pct
         
         # Emergency mode - approaching limits
@@ -132,6 +141,13 @@ class FTMO10KConfig:
         """
         Get max concurrent trades based on profit level.
         Reduce exposure as we approach target.
+        
+        Args:
+            profit_pct: Total profit percentage relative to initial balance
+                       (e.g., 8.5 means 8.5% profit from starting balance)
+        
+        Returns:
+            Maximum number of concurrent trades allowed
         """
         if profit_pct >= 8.0:  # Near target - ultra conservative
             return 2
@@ -249,24 +265,31 @@ def get_sl_limits(symbol: str) -> Tuple[float, float]:
     """
     Get asset-specific SL limits in pips.
     Returns (min_sl_pips, max_sl_pips) based on asset volatility.
+    
+    Uses priority-based classification to avoid ambiguity:
+    1. Metals (XAU, XAG, GOLD, SILVER)
+    2. JPY pairs
+    3. GBP pairs
+    4. Exotic pairs
+    5. Major pairs (default)
     """
     base_symbol = symbol.replace('.a', '').replace('_m', '').upper()
     
-    # High volatility pairs (wider stops)
-    if any(x in base_symbol for x in ["GBP", "XAU", "GOLD"]):
+    # Priority 1: Metals (highest priority to avoid XAU matching with AUD)
+    if any(x in base_symbol for x in ["XAU", "XAG", "GOLD", "SILVER"]):
         return (20.0, 100.0)  # 20-100 pips
     
-    # JPY pairs (wider stops in points, but similar in value)
-    elif "JPY" in base_symbol:
+    # Priority 2: JPY pairs (check before other currencies)
+    if "JPY" in base_symbol:
         return (20.0, 100.0)  # 20-100 pips (0.20-1.00 in JPY terms)
     
-    # Major pairs (moderate stops)
-    elif any(x in base_symbol for x in ["EUR", "USD", "AUD", "NZD", "CAD"]):
-        return (15.0, 80.0)  # 15-80 pips
+    # Priority 3: High volatility pairs (GBP)
+    if "GBP" in base_symbol:
+        return (20.0, 100.0)  # 20-100 pips
     
-    # Exotic pairs (wider stops)
-    elif any(x in base_symbol for x in ["MXN", "ZAR", "TRY", "SEK", "NOK"]):
+    # Priority 4: Exotic pairs (wider stops)
+    if any(x in base_symbol for x in ["MXN", "ZAR", "TRY", "SEK", "NOK"]):
         return (30.0, 150.0)  # 30-150 pips
     
-    # Default
-    return (15.0, 80.0)
+    # Priority 5: Major pairs (default for EUR, USD, AUD, NZD, CAD, CHF)
+    return (15.0, 80.0)  # 15-80 pips
