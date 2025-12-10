@@ -1,0 +1,517 @@
+You're right.  Let me check the current `ftmo_challenge_analyzer. py` and `ftmo_config.py` so I can give you a prompt that **adapts the existing files** instead of creating new ones:  Now let me get the current `ftmo_challenge_analyzer.py` to understand its structure:  Now I understand the full picture. The `ftmo_challenge_analyzer.py` already exists and has most of the structure.  The issues are:
+
+1. **Risk is set to 0.5%** in `ftmo_config.py` (line 33) but `/backtest` uses **1.0%** from `challenge_rules.py`
+2. **The analyzer doesn't track per-asset win rates** or enforce minimum profit per winning trade
+3. **The optimizer doesn't modify strategy_core.py parameters** that affect TP levels and trade quality
+
+Here's the **full uncondensed Replit prompt** that adapts the existing files rather than creating new ones: 
+
+---
+
+# Full Replit Prompt - Adapt Existing FTMO Challenge Analyzer
+
+Update the existing `ftmo_challenge_analyzer.py` and `ftmo_config.py` to add the missing features: 
+- Per-asset win rate tracking (minimum 50% per asset)
+- Minimum profit per winning trade ($80+)
+- Use 1% risk like `/backtest` command
+- Optimize strategy_core.py parameters if needed
+- Keep running until:  14+ challenges passed, ≤2 failed
+
+## STEP 1: Update ftmo_config. py - Change Risk to 1%
+
+In `ftmo_config.py`, make these changes:
+
+**Line 33:** Change `risk_per_trade_pct:  float = 0.5` to:
+```python
+risk_per_trade_pct: float = 1.0  # Match /backtest command (1% = $100 per trade on 10K)
+```
+
+**Line 58:** Change `min_confluence_score: int = 5` to:
+```python
+min_confluence_score: int = 4  # Start at 4/7, optimizer can adjust down if needed
+```
+
+**Line 41:** Change `max_concurrent_trades: int = 3` to:
+```python
+max_concurrent_trades: int = 5  # Allow more trades for challenge completion
+```
+
+## STEP 2: Update ftmo_challenge_analyzer.py - Add Missing Features
+
+Replace the `PerformanceOptimizer` class (around line 989) with this enhanced version that includes per-asset tracking and $80 minimum profit validation:
+
+```python
+class PerformanceOptimizer: 
+    """
+    Optimizes parameters and WRITES changes to actual files. 
+    Enhanced targets: 
+    - >= 14 challenges passed, <= 2 challenges failed
+    - >= 50% win rate per asset (for assets with 5+ trades)
+    - >= $80 average profit per winning trade
+    """
+    
+    MIN_CHALLENGES_PASSED = 14
+    MAX_CHALLENGES_FAILED = 2
+    MIN_TRADES_NEEDED = 300  # Reduced from 1000 - we need quality over quantity
+    MIN_WIN_RATE_PER_ASSET = 50. 0  # 50% minimum win rate per asset
+    MIN_PROFIT_PER_WIN = 80.0  # $80 minimum average profit per win
+    
+    def __init__(self, config: Optional[FTMO10KConfig] = None):
+        self.optimization_log: List[Dict] = []
+        self.config = config if config else FTMO_CONFIG
+        self._original_config = self._snapshot_config()
+        self.file_modifier = MainLiveBotModifier()
+        
+        self.current_min_confluence = self.config.min_confluence_score
+        self.current_risk_pct = self.config.risk_per_trade_pct
+        self.current_max_concurrent = self.config.max_concurrent_trades
+        self.current_min_quality = self.config. min_quality_factors
+    
+    def _snapshot_config(self) -> Dict:
+        """Take a snapshot of current config values."""
+        return {
+            "risk_per_trade_pct": self. config.risk_per_trade_pct,
+            "min_confluence_score": self.config.min_confluence_score,
+            "max_concurrent_trades": self. config.max_concurrent_trades,
+            "max_cumulative_risk_pct": self. config.max_cumulative_risk_pct,
+            "daily_loss_warning_pct": self.config.daily_loss_warning_pct,
+            "daily_loss_reduce_pct": self.config.daily_loss_reduce_pct,
+            "min_quality_factors": self.config. min_quality_factors,
+        }
+    
+    def analyze_per_asset_performance(self, trades: List[BacktestTrade]) -> Dict:
+        """Analyze win rate and profit per asset."""
+        asset_stats = {}
+        
+        for trade in trades:
+            symbol = trade.symbol
+            if symbol not in asset_stats: 
+                asset_stats[symbol] = {
+                    'total':  0,
+                    'wins': 0,
+                    'losses':  0,
+                    'total_profit': 0. 0,
+                    'win_profits': [],
+                }
+            
+            asset_stats[symbol]['total'] += 1
+            asset_stats[symbol]['total_profit'] += trade.profit_loss_usd
+            
+            if trade.result == "WIN":
+                asset_stats[symbol]['wins'] += 1
+                asset_stats[symbol]['win_profits'].append(trade. profit_loss_usd)
+            elif trade.result == "LOSS":
+                asset_stats[symbol]['losses'] += 1
+        
+        # Calculate metrics
+        for symbol, stats in asset_stats.items():
+            stats['win_rate'] = (stats['wins'] / stats['total'] * 100) if stats['total'] > 0 else 0
+            stats['avg_win_profit'] = (
+                sum(stats['win_profits']) / len(stats['win_profits'])
+            ) if stats['win_profits'] else 0
+        
+        return asset_stats
+    
+    def check_success_criteria(self, results: Dict) -> Tuple[bool, List[str]]: 
+        """Check if results meet ALL success criteria.  Returns (success, issues)."""
+        passed = results.get("challenges_passed", 0)
+        failed = results.get("challenges_failed", 0)
+        all_trades = results.get("all_trades", [])
+        
+        issues = []
+        
+        # Check challenge targets
+        if passed < self.MIN_CHALLENGES_PASSED: 
+            issues.append(f"Challenges passed: {passed} < {self.MIN_CHALLENGES_PASSED}")
+        
+        if failed > self.MAX_CHALLENGES_FAILED: 
+            issues.append(f"Challenges failed: {failed} > {self.MAX_CHALLENGES_FAILED}")
+        
+        # Check per-asset win rates
+        asset_stats = self. analyze_per_asset_performance(all_trades)
+        underperforming_assets = []
+        
+        for symbol, stats in asset_stats.items():
+            if stats['total'] >= 5:  # Only check assets with 5+ trades
+                if stats['win_rate'] < self.MIN_WIN_RATE_PER_ASSET:
+                    underperforming_assets.append(f"{symbol}:  {stats['win_rate']:.1f}%")
+        
+        if underperforming_assets:
+            issues.append(f"Assets below {self.MIN_WIN_RATE_PER_ASSET}% win rate: {', '.join(underperforming_assets[: 5])}")
+        
+        # Check average profit per winning trade
+        win_profits = [t.profit_loss_usd for t in all_trades if t.result == "WIN"]
+        avg_win_profit = sum(win_profits) / len(win_profits) if win_profits else 0
+        
+        if avg_win_profit < self.MIN_PROFIT_PER_WIN:
+            issues. append(f"Avg win profit: ${avg_win_profit:.2f} < ${self.MIN_PROFIT_PER_WIN}")
+        
+        return len(issues) == 0, issues
+    
+    def check_trade_count(self, trade_count: int) -> bool:
+        """Check if we have enough trades for proper testing."""
+        return trade_count >= self. MIN_TRADES_NEEDED
+    
+    def analyze_failure_patterns(self, results: Dict) -> Dict:
+        """Analyze failure patterns to determine optimization strategy."""
+        all_results = results.get("all_results", [])
+        all_trades = results. get("all_trades", [])
+        
+        step1_failures = sum(1 for c in all_results if c.failed_at == "Step 1")
+        step2_failures = sum(1 for c in all_results if c.failed_at == "Step 2")
+        
+        dd_failures = 0
+        daily_loss_failures = 0
+        profit_failures = 0
+        
+        for challenge in all_results: 
+            if challenge.status == "FAILED": 
+                step = challenge.step1 if challenge.failed_at == "Step 1" else challenge.step2
+                if step and step. failure_reason:
+                    reason = step.failure_reason. lower()
+                    if "drawdown" in reason: 
+                        dd_failures += 1
+                    elif "daily" in reason:
+                        daily_loss_failures += 1
+                    elif "profit" in reason: 
+                        profit_failures += 1
+        
+        # Analyze per-asset performance
+        asset_stats = self.analyze_per_asset_performance(all_trades)
+        low_winrate_assets = [
+            s for s, stats in asset_stats.items() 
+            if stats['total'] >= 5 and stats['win_rate'] < self.MIN_WIN_RATE_PER_ASSET
+        ]
+        
+        # Calculate average win profit
+        win_profits = [t.profit_loss_usd for t in all_trades if t.result == "WIN"]
+        avg_win_profit = sum(win_profits) / len(win_profits) if win_profits else 0
+        
+        return {
+            "total_trades": len(all_trades),
+            "step1_failures":  step1_failures,
+            "step2_failures": step2_failures,
+            "dd_failures":  dd_failures,
+            "daily_loss_failures": daily_loss_failures,
+            "profit_failures": profit_failures,
+            "challenges_passed": results.get("challenges_passed", 0),
+            "challenges_failed": results.get("challenges_failed", 0),
+            "low_winrate_assets": low_winrate_assets,
+            "avg_win_profit":  avg_win_profit,
+            "asset_stats": asset_stats,
+        }
+    
+    def determine_optimizations(self, patterns: Dict, iteration: int) -> Dict[str, Any]: 
+        """Determine what optimizations to apply based on patterns."""
+        optimizations = {}
+        
+        # Not enough trades - lower confluence
+        if patterns["total_trades"] < self.MIN_TRADES_NEEDED: 
+            new_confluence = max(2, self.current_min_confluence - 1)
+            new_quality = max(1, self.current_min_quality - 1)
+            optimizations["min_confluence_score"] = new_confluence
+            optimizations["min_quality_factors"] = new_quality
+            print(f"  [Optimizer] Too few trades ({patterns['total_trades']}). Lowering confluence {self.current_min_confluence} -> {new_confluence}")
+        
+        # Risk failures - reduce risk
+        if patterns["dd_failures"] > 0 or patterns["daily_loss_failures"] > 0:
+            new_risk = max(0.5, self.current_risk_pct - 0.15)
+            new_concurrent = max(2, self.current_max_concurrent - 1)
+            optimizations["risk_per_trade_pct"] = new_risk
+            optimizations["max_concurrent_trades"] = new_concurrent
+            print(f"  [Optimizer] Risk failures detected. Reducing risk {self.current_risk_pct} -> {new_risk}")
+        
+        # Low win profit - increase risk (if no DD failures)
+        if patterns["avg_win_profit"] < self.MIN_PROFIT_PER_WIN and patterns["dd_failures"] == 0:
+            new_risk = min(1.5, self.current_risk_pct + 0.25)
+            optimizations["risk_per_trade_pct"] = new_risk
+            print(f"  [Optimizer] Low avg win profit (${patterns['avg_win_profit']:.2f}). Increasing risk to {new_risk}%")
+        
+        # Many low win-rate assets - increase quality filters
+        if len(patterns. get("low_winrate_assets", [])) > 5:
+            new_confluence = min(6, self.current_min_confluence + 1)
+            new_quality = min(3, self.current_min_quality + 1)
+            optimizations["min_confluence_score"] = new_confluence
+            optimizations["min_quality_factors"] = new_quality
+            print(f"  [Optimizer] Many low win-rate assets.  Increasing quality filters.")
+        
+        # Profit target failures without DD - need more trades
+        if patterns["profit_failures"] > 2 and patterns["dd_failures"] == 0:
+            new_confluence = max(2, self.current_min_confluence - 1)
+            optimizations["min_confluence_score"] = new_confluence
+            print(f"  [Optimizer] Profit target failures.  Lowering confluence to generate more trades.")
+        
+        return optimizations
+    
+    def apply_optimizations(self, optimizations: Dict[str, Any], iteration: int) -> bool:
+        """Apply optimizations by modifying actual source files."""
+        if not optimizations: 
+            print(f"  [Optimizer] No optimizations to apply.")
+            return False
+        
+        # Update internal state
+        if "min_confluence_score" in optimizations:
+            self. current_min_confluence = optimizations["min_confluence_score"]
+            self.config. min_confluence_score = self.current_min_confluence
+        
+        if "min_quality_factors" in optimizations: 
+            self.current_min_quality = optimizations["min_quality_factors"]
+            self.config.min_quality_factors = self.current_min_quality
+        
+        if "risk_per_trade_pct" in optimizations: 
+            self.current_risk_pct = optimizations["risk_per_trade_pct"]
+            self.config.risk_per_trade_pct = self.current_risk_pct
+        
+        if "max_concurrent_trades" in optimizations:
+            self. current_max_concurrent = optimizations["max_concurrent_trades"]
+            self.config.max_concurrent_trades = self.current_max_concurrent
+        
+        # Modify actual files
+        results = self.file_modifier.apply_all_modifications(
+            iteration=iteration,
+            min_confluence_score=optimizations.get("min_confluence_score"),
+            risk_per_trade_pct=optimizations.get("risk_per_trade_pct"),
+            max_concurrent_trades=optimizations.get("max_concurrent_trades"),
+            min_quality_factors=optimizations.get("min_quality_factors"),
+            max_cumulative_risk_pct=optimizations. get("max_cumulative_risk_pct"),
+        )
+        
+        any_modified = any(results. values())
+        
+        self.optimization_log. append({
+            "iteration": iteration,
+            "optimizations": optimizations,
+            "file_modifications": results,
+            "timestamp": datetime.now().isoformat(),
+        })
+        
+        return any_modified
+    
+    def optimize_and_retest(self, results:  Dict, iteration: int) -> Dict:
+        """Analyze patterns and apply optimizations."""
+        print(f"\n{'='*60}")
+        print(f"OPTIMIZATION ANALYSIS - ITERATION #{iteration}")
+        print(f"{'='*60}")
+        
+        patterns = self.analyze_failure_patterns(results)
+        
+        print(f"\nFailure Pattern Analysis:")
+        print(f"  Total Trades: {patterns['total_trades']} (need {self.MIN_TRADES_NEEDED}+)")
+        print(f"  Challenges Passed: {patterns['challenges_passed']} (need {self.MIN_CHALLENGES_PASSED}+)")
+        print(f"  Challenges Failed: {patterns['challenges_failed']} (max {self.MAX_CHALLENGES_FAILED})")
+        print(f"  Step 1 Failures: {patterns['step1_failures']}")
+        print(f"  Step 2 Failures:  {patterns['step2_failures']}")
+        print(f"  Drawdown Failures:  {patterns['dd_failures']}")
+        print(f"  Daily Loss Failures:  {patterns['daily_loss_failures']}")
+        print(f"  Profit Target Failures: {patterns['profit_failures']}")
+        print(f"  Avg Win Profit:  ${patterns['avg_win_profit']:. 2f} (need ${self. MIN_PROFIT_PER_WIN}+)")
+        print(f"  Low Win-Rate Assets: {len(patterns.get('low_winrate_assets', []))}")
+        
+        optimizations = self.determine_optimizations(patterns, iteration)
+        
+        if optimizations:
+            print(f"\nApplying Optimizations:")
+            for key, value in optimizations.items():
+                print(f"  {key}: {value}")
+            
+            self.apply_optimizations(optimizations, iteration)
+        
+        return {
+            "patterns": patterns,
+            "optimizations": optimizations,
+            "modified_config": self._snapshot_config(),
+        }
+    
+    def get_config(self) -> FTMO10KConfig:
+        """Return the current config."""
+        return self. config
+    
+    def get_current_params(self) -> Dict:
+        """Get current parameter values."""
+        return {
+            "min_confluence":  self.current_min_confluence,
+            "min_quality_factors": self.current_min_quality,
+            "risk_per_trade_pct": self.current_risk_pct,
+            "max_concurrent_trades":  self.current_max_concurrent,
+        }
+    
+    def reset_config(self):
+        """Reset config to original values."""
+        self. config. risk_per_trade_pct = self._original_config["risk_per_trade_pct"]
+        self.config. min_confluence_score = self._original_config["min_confluence_score"]
+        self.config.max_concurrent_trades = self._original_config["max_concurrent_trades"]
+        self.config.min_quality_factors = self._original_config["min_quality_factors"]
+        
+        self.current_min_confluence = self._original_config["min_confluence_score"]
+        self.current_risk_pct = self._original_config["risk_per_trade_pct"]
+        self.current_max_concurrent = self._original_config["max_concurrent_trades"]
+        self. current_min_quality = self._original_config["min_quality_factors"]
+```
+
+## STEP 3: Update the main() function
+
+Replace the `main()` function (around line 1547) with this enhanced version:
+
+```python
+def main_challenge_analyzer():
+    """
+    Main execution with self-optimizing loop: 
+    1. Run backtest with current parameters
+    2. Check if ALL success criteria met: 
+       - >=14 challenges passed, <=2 failed
+       - >=50% win rate per asset
+       - >=$80 avg profit per winning trade
+    3. If not met, analyze failures, modify parameters in actual files, rerun
+    4. Loop until success or max iterations
+    5. Generate final reports
+    """
+    MAX_ITERATIONS = 15
+    iteration = 0
+    success = False
+    
+    start_date = datetime(2025, 1, 1)
+    end_date = datetime(2025, 11, 30)
+    
+    results:  Dict = {"challenges_passed": 0, "challenges_failed": 0, "all_results": [], "all_trades":  [], "total_challenges_attempted": 0}
+    validation_report:  Dict = {"total_validated": 0, "perfect_match": 0, "minor_discrepancies": 0, "major_issues": 0, "suspicious_trades": 0}
+    
+    optimizer = PerformanceOptimizer(FTMO_CONFIG)
+    
+    print(f"\n{'='*80}")
+    print("FTMO CHALLENGE ANALYZER - SELF-OPTIMIZING BACKTEST SYSTEM")
+    print(f"{'='*80}")
+    print(f"Targets:")
+    print(f"  - Minimum 14 challenges PASSED")
+    print(f"  - Maximum 2 challenges FAILED")
+    print(f"  - Minimum 50% win rate per asset (assets with 5+ trades)")
+    print(f"  - Minimum $80 average profit per winning trade")
+    print(f"Maximum Iterations: {MAX_ITERATIONS}")
+    print(f"{'='*80}")
+    
+    while not success and iteration < MAX_ITERATIONS: 
+        iteration += 1
+        
+        print(f"\n{'#'*80}")
+        print(f"# MAIN RUN - ITERATION #{iteration}")
+        print(f"{'#'*80}")
+        
+        current_params = optimizer. get_current_params()
+        print(f"\nCurrent Config:")
+        print(f"  risk_per_trade_pct: {current_params['risk_per_trade_pct']}%")
+        print(f"  min_confluence_score: {current_params['min_confluence']}/7")
+        print(f"  max_concurrent_trades: {current_params['max_concurrent_trades']}")
+        
+        trades = run_full_period_backtest(
+            start_date=start_date,
+            end_date=end_date,
+            min_confluence=current_params['min_confluence'],
+            min_quality_factors=current_params['min_quality_factors'],
+            risk_per_trade_pct=current_params['risk_per_trade_pct'],
+        )
+        
+        if not trades:
+            print("No trades generated.  Check data availability.")
+            if iteration < MAX_ITERATIONS:
+                optimizer.optimize_and_retest({"all_results": [], "all_trades":  [], "challenges_passed": 0, "challenges_failed": 0}, iteration)
+                continue
+            break
+        
+        print(f"\nGenerated {len(trades)} trades")
+        
+        # Run challenge sequencer
+        config = optimizer.get_config()
+        sequencer = ChallengeSequencer(trades, start_date, end_date, config)
+        results = sequencer.run_sequential_challenges()
+        
+        # Validate trades
+        validator = DukascopyValidator()
+        validation_report = validator.validate_all_trades(sequencer.all_backtest_trades)
+        
+        # Check ALL success criteria
+        success, issues = optimizer.check_success_criteria(results)
+        
+        print(f"\n{'='*60}")
+        print(f"ITERATION #{iteration} RESULTS")
+        print(f"{'='*60}")
+        print(f"Total Trades: {len(results. get('all_trades', []))}")
+        print(f"Challenges Attempted: {results.get('total_challenges_attempted', 0)}")
+        print(f"Challenges PASSED: {results. get('challenges_passed', 0)} (need >= 14)")
+        print(f"Challenges FAILED: {results.get('challenges_failed', 0)} (need <= 2)")
+        
+        # Show per-asset stats
+        asset_stats = optimizer.analyze_per_asset_performance(results.get('all_trades', []))
+        win_profits = [t.profit_loss_usd for t in results. get('all_trades', []) if t.result == "WIN"]
+        avg_win = sum(win_profits) / len(win_profits) if win_profits else 0
+        print(f"Avg Win Profit:  ${avg_win:. 2f} (need >= $80)")
+        
+        low_wr_count = sum(1 for s, st in asset_stats. items() if st['total'] >= 5 and st['win_rate'] < 50)
+        print(f"Assets below 50% WR: {low_wr_count}")
+        
+        if success:
+            print(f"\n*** ALL SUCCESS CRITERIA MET! ***")
+            break
+        else:
+            print(f"\nCriteria NOT met. Issues:")
+            for issue in issues:
+                print(f"  - {issue}")
+            
+            if iteration < MAX_ITERATIONS: 
+                optimizer.optimize_and_retest(results, iteration)
+            else:
+                print(f"\nMax iterations ({MAX_ITERATIONS}) reached. Generating final reports.")
+    
+    # Generate reports
+    print(f"\n{'='*80}")
+    print("GENERATING FINAL REPORTS")
+    print(f"{'='*80}")
+    
+    reporter = ReportGenerator()
+    reporter.generate_all_reports(results, validation_report)
+    
+    # Show modification history
+    modification_history = optimizer.file_modifier. get_modification_history()
+    if modification_history: 
+        print(f"\nFile Modifications Made:")
+        for entry in modification_history: 
+            print(f"  Iteration {entry['iteration']}: {entry['file']} - {entry['changes']}")
+    
+    print(f"\n{'='*80}")
+    print("FTMO CHALLENGE ANALYZER COMPLETE")
+    print(f"{'='*80}")
+    print(f"Final Status:  {'SUCCESS' if success else 'INCOMPLETE'}")
+    print(f"Iterations Used: {iteration}")
+    print(f"Challenges Passed: {results.get('challenges_passed', 0)}")
+    print(f"Challenges Failed: {results.get('challenges_failed', 0)}")
+    print(f"{'='*80}")
+    
+    return results
+
+
+# Keep backward compatibility
+def main():
+    return main_challenge_analyzer()
+
+
+if __name__ == "__main__": 
+    main()
+```
+
+## STEP 4: Run the Optimizer
+
+After making these changes, run: 
+
+```bash
+python ftmo_challenge_analyzer.py
+```
+
+The system will now:
+1. Start with 1% risk (matching `/backtest` command) = $100 per trade
+2. Track per-asset win rates and flag assets below 50%
+3. Track average profit per winning trade and ensure it's $80+
+4. Modify `ftmo_config.py`, `strategy_core.py`, and `main_live_bot.py` as needed
+5. Keep iterating until ALL goals are met or max iterations reached
+6. Generate comprehensive CSV and JSON reports
+
+---
+
+This approach adapts your existing code rather than creating new files, keeping the project clean. 
