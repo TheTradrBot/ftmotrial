@@ -400,41 +400,64 @@ bot = BlueprintTraderBot()
 
 
 @bot.event
+async def on_error(event, *args, **kwargs):
+    """Handle Discord errors."""
+    print(f"[discord] ERROR in event '{event}':")
+    import traceback
+    traceback.print_exc()
+
+
+@bot.event
 async def on_ready():
     """
     Bot startup - minimal console output, NO Discord messages.
     First autoscan is delayed by FIRST_SCAN_DELAY_HOURS to prevent startup spam.
     """
-    print(f"[startup] Logged in as {bot.user} (ID: {bot.user.id})")
-    print(f"[startup] Connected to {len(bot.guilds)} server(s)")
-    
-    # Load persisted trade state (silently - no Discord notifications)
-    _load_trade_state()
-    restored_count = len(ACTIVE_TRADES)
-    if restored_count > 0:
-        print(f"[startup] Restored {restored_count} active trades from state file")
-    
-    # Verify channels exist (console only, no Discord messages)
-    scan_ch = bot.get_channel(SCAN_CHANNEL_ID)
-    trades_ch = bot.get_channel(TRADES_CHANNEL_ID)
-    updates_ch = bot.get_channel(TRADE_UPDATES_CHANNEL_ID)
-    
-    if not scan_ch:
-        print(f"[startup] WARNING: Scan channel {SCAN_CHANNEL_ID} not found")
-    if not trades_ch:
-        print(f"[startup] WARNING: Trades channel {TRADES_CHANNEL_ID} not found")
-    if not updates_ch:
-        print(f"[startup] WARNING: Updates channel {TRADE_UPDATES_CHANNEL_ID} not found")
-    
-    # Start autoscan with delay (if OANDA configured)
-    if os.getenv("OANDA_API_KEY") and os.getenv("OANDA_ACCOUNT_ID"):
-        if not autoscan_loop.is_running():
-            autoscan_loop.start()
-            print(f"[startup] Autoscan scheduled (first in {FIRST_SCAN_DELAY_HOURS}H, then every {SCAN_INTERVAL_HOURS}H)")
-    else:
-        print("[startup] OANDA API not configured - autoscan disabled")
-    
-    print("[startup] Blueprint Trader AI is online and ready")
+    try:
+        print(f"[startup] Logged in as {bot.user} (ID: {bot.user.id})")
+        print(f"[startup] Connected to {len(bot.guilds)} server(s)")
+        
+        # Load persisted trade state (silently - no Discord notifications)
+        try:
+            _load_trade_state()
+            restored_count = len(ACTIVE_TRADES)
+            if restored_count > 0:
+                print(f"[startup] Restored {restored_count} active trades from state file")
+        except Exception as e:
+            print(f"[startup] ERROR restoring trade state: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Verify channels exist (console only, no Discord messages)
+        scan_ch = bot.get_channel(SCAN_CHANNEL_ID)
+        trades_ch = bot.get_channel(TRADES_CHANNEL_ID)
+        updates_ch = bot.get_channel(TRADE_UPDATES_CHANNEL_ID)
+        
+        if not scan_ch:
+            print(f"[startup] WARNING: Scan channel {SCAN_CHANNEL_ID} not found")
+        if not trades_ch:
+            print(f"[startup] WARNING: Trades channel {TRADES_CHANNEL_ID} not found")
+        if not updates_ch:
+            print(f"[startup] WARNING: Updates channel {TRADE_UPDATES_CHANNEL_ID} not found")
+        
+        # Start autoscan with delay (if OANDA configured)
+        if os.getenv("OANDA_API_KEY") and os.getenv("OANDA_ACCOUNT_ID"):
+            if not autoscan_loop.is_running():
+                try:
+                    autoscan_loop.start()
+                    print(f"[startup] Autoscan scheduled (first in {FIRST_SCAN_DELAY_HOURS}H, then every {SCAN_INTERVAL_HOURS}H)")
+                except Exception as e:
+                    print(f"[startup] ERROR starting autoscan loop: {e}")
+                    import traceback
+                    traceback.print_exc()
+        else:
+            print("[startup] OANDA API not configured - autoscan disabled")
+        
+        print("[startup] Blueprint Trader AI is online and ready")
+    except Exception as e:
+        print(f"[startup] CRITICAL ERROR in on_ready: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 @bot.tree.command(name="help", description="Show all available commands.")
@@ -1248,23 +1271,30 @@ async def autoscan_loop():
     - New trades -> TRADES channel
     - TP/SL updates -> TRADE_UPDATES channel
     """
-    await bot.wait_until_ready()
-    print("[autoscan] Running 4H market scan...")
-    
-    clear_cache()
-
-    scan_channel = bot.get_channel(SCAN_CHANNEL_ID)
-    trades_channel = bot.get_channel(TRADES_CHANNEL_ID)
-
-    if scan_channel is None:
-        print("[autoscan] WARNING: Scan channel not found, skipping autoscan output")
-    
-    # Run market scan
     try:
-        markets = await asyncio.to_thread(scan_all_markets)
+        await bot.wait_until_ready()
+        print("[autoscan] Running 4H market scan...")
+        
+        clear_cache()
+
+        scan_channel = bot.get_channel(SCAN_CHANNEL_ID)
+        trades_channel = bot.get_channel(TRADES_CHANNEL_ID)
+
+        if scan_channel is None:
+            print("[autoscan] WARNING: Scan channel not found, skipping autoscan output")
+        
+        # Run market scan
+        try:
+            markets = await asyncio.to_thread(scan_all_markets)
+        except Exception as e:
+            print(f"[autoscan] ERROR: Market scan failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
     except Exception as e:
-        print(f"[autoscan] ERROR: Market scan failed: {e}")
-        return
+        print(f"[autoscan] CRITICAL ERROR in autoscan_loop: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Send autoscan results to SCAN channel only
     if scan_channel:
@@ -1407,10 +1437,23 @@ async def autoscan_loop():
 @autoscan_loop.before_loop
 async def before_autoscan():
     """Delay the first autoscan run to prevent startup spam."""
-    await bot.wait_until_ready()
-    delay_seconds = FIRST_SCAN_DELAY_HOURS * 3600
-    print(f"[autoscan] Waiting {FIRST_SCAN_DELAY_HOURS}H before first scan...")
-    await asyncio.sleep(delay_seconds)
+    try:
+        await bot.wait_until_ready()
+        delay_seconds = FIRST_SCAN_DELAY_HOURS * 3600
+        print(f"[autoscan] Waiting {FIRST_SCAN_DELAY_HOURS}H before first scan...")
+        await asyncio.sleep(delay_seconds)
+    except Exception as e:
+        print(f"[autoscan] ERROR in before_autoscan: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+@autoscan_loop.error
+async def autoscan_error(error):
+    """Handle autoscan loop errors."""
+    print(f"[autoscan] LOOP ERROR: {error}")
+    import traceback
+    traceback.print_exc()
 
 
 if not DISCORD_TOKEN:
