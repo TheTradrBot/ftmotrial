@@ -40,11 +40,20 @@ def backtest_live_bot(
     5. FTMO challenge tracking
     
     Returns comprehensive results with challenge pass/fail.
+    
+    MATCHES main_live_bot.py EXACTLY:
+    - Same symbol list (ALL_TRADABLE_OANDA - 42 assets)
+    - Same confluence threshold (4/7)
+    - Same quality factors (2 minimum)
+    - Same risk settings (0.5% per trade)
+    - Same partial close percentages (50%/30%/20%)
+    - Same SL validation (ATR-based + pip limits)
+    - Same entry distance rules (max 1.2R)
     """
     from symbol_mapping import ALL_TRADABLE_OANDA
     
     if symbols is None:
-        # Use all tradable assets (42 total)
+        # Use all tradable assets (42 total) - SAME as main_live_bot.py
         symbols = ALL_TRADABLE_OANDA
     
     print("\n" + "=" * 80)
@@ -56,6 +65,9 @@ def backtest_live_bot(
     print(f"Min Quality Factors: {FTMO_CONFIG.min_quality_factors}")
     print(f"Risk per trade: {FTMO_CONFIG.risk_per_trade_pct}%")
     print(f"Max concurrent trades: {FTMO_CONFIG.max_concurrent_trades}")
+    print(f"Max entry distance: {FTMO_CONFIG.max_entry_distance_r}R")
+    print(f"TP R-multiples: {FTMO_CONFIG.tp1_r_multiple}R / {FTMO_CONFIG.tp2_r_multiple}R / {FTMO_CONFIG.tp3_r_multiple}R")
+    print(f"Partial closes: {FTMO_CONFIG.tp1_close_pct*100:.0f}% / {FTMO_CONFIG.tp2_close_pct*100:.0f}% / {FTMO_CONFIG.tp3_close_pct*100:.0f}%")
     print("=" * 80)
     
     # Collect all trades across all symbols
@@ -110,29 +122,30 @@ def backtest_live_bot(
                 if risk <= 0:
                     continue
                 
-                # Simulate partial exits like main_live_bot.py
+                # Simulate partial exits like main_live_bot.py (EXACT MATCH)
+                # FTMO_CONFIG: tp1_close_pct=0.50, tp2_close_pct=0.30, tp3_close_pct=0.20
                 if bt.exit_reason == "TP3":
-                    # Full runner to TP3 = TP1 (45%) + TP2 (30%) + TP3 (25%)
+                    # Full runner to TP3 = TP1 (50%) + TP2 (30%) + TP3 (20%)
                     tp1_r = (bt.tp1 - entry) / risk if bt.direction == "bullish" else (entry - bt.tp1) / risk
                     tp2_r = (bt.tp2 - entry) / risk if bt.direction == "bullish" else (entry - bt.tp2) / risk
                     tp3_r = (bt.tp3 - entry) / risk if bt.direction == "bullish" else (entry - bt.tp3) / risk
                     bt.partial_exits = [
-                        {"level": "TP1", "r_multiple": tp1_r, "portion": 0.45},
-                        {"level": "TP2", "r_multiple": tp2_r, "portion": 0.30},
-                        {"level": "TP3", "r_multiple": tp3_r, "portion": 0.25},
+                        {"level": "TP1", "r_multiple": tp1_r, "portion": FTMO_CONFIG.tp1_close_pct},
+                        {"level": "TP2", "r_multiple": tp2_r, "portion": FTMO_CONFIG.tp2_close_pct},
+                        {"level": "TP3", "r_multiple": tp3_r, "portion": FTMO_CONFIG.tp3_close_pct},
                     ]
                 elif bt.exit_reason == "TP2":
                     tp1_r = (bt.tp1 - entry) / risk if bt.direction == "bullish" else (entry - bt.tp1) / risk
                     tp2_r = (bt.tp2 - entry) / risk if bt.direction == "bullish" else (entry - bt.tp2) / risk
                     bt.partial_exits = [
-                        {"level": "TP1", "r_multiple": tp1_r, "portion": 0.45},
-                        {"level": "TP2", "r_multiple": tp2_r, "portion": 0.55},
+                        {"level": "TP1", "r_multiple": tp1_r, "portion": FTMO_CONFIG.tp1_close_pct},
+                        {"level": "TP2", "r_multiple": tp2_r, "portion": FTMO_CONFIG.tp2_close_pct + FTMO_CONFIG.tp3_close_pct},
                     ]
                 elif bt.exit_reason == "TP1+Trail":
                     tp1_r = (bt.tp1 - entry) / risk if bt.direction == "bullish" else (entry - bt.tp1) / risk
                     bt.partial_exits = [
-                        {"level": "TP1", "r_multiple": tp1_r, "portion": 0.45},
-                        {"level": "BE", "r_multiple": 0, "portion": 0.55},
+                        {"level": "TP1", "r_multiple": tp1_r, "portion": FTMO_CONFIG.tp1_close_pct},
+                        {"level": "BE", "r_multiple": 0, "portion": FTMO_CONFIG.tp2_close_pct + FTMO_CONFIG.tp3_close_pct},
                     ]
                 else:  # SL
                     bt.partial_exits = [
