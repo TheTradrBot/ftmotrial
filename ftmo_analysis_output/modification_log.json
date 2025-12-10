@@ -489,5 +489,149 @@
       "MIN_CONFLUENCE -> 4"
     ],
     "timestamp": "2025-12-10T22:02:36.173017"
+  },
+  {
+    "iteration": 1,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter1_20251210_221948.py",
+    "changes": [
+      "risk_per_trade_pct -> 0.85"
+    ],
+    "timestamp": "2025-12-10T22:19:48.960313"
+  },
+  {
+    "iteration": 2,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter2_20251210_221952.py",
+    "changes": [
+      "risk_per_trade_pct -> 1.1"
+    ],
+    "timestamp": "2025-12-10T22:19:52.995253"
+  },
+  {
+    "iteration": 1,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter1_20251210_222103.py",
+    "changes": [
+      "risk_per_trade_pct -> 1.25"
+    ],
+    "timestamp": "2025-12-10T22:21:03.140031"
+  },
+  {
+    "iteration": 2,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter2_20251210_222106.py",
+    "changes": [
+      "risk_per_trade_pct -> 1.1"
+    ],
+    "timestamp": "2025-12-10T22:21:06.939450"
+  },
+  {
+    "iteration": 3,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter3_20251210_222110.py",
+    "changes": [
+      "risk_per_trade_pct -> 0.9500000000000001"
+    ],
+    "timestamp": "2025-12-10T22:21:10.875074"
+  },
+  {
+    "iteration": 4,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter4_20251210_222114.py",
+    "changes": [
+      "risk_per_trade_pct -> 0.8"
+    ],
+    "timestamp": "2025-12-10T22:21:14.802110"
+  },
+  {
+    "iteration": 5,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter5_20251210_222118.py",
+    "changes": [
+      "risk_per_trade_pct -> 1.05"
+    ],
+    "timestamp": "2025-12-10T22:21:18.612590"
+  },
+  {
+    "iteration": 6,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter6_20251210_222122.py",
+    "changes": [
+      "risk_per_trade_pct -> 0.9"
+    ],
+    "timestamp": "2025-12-10T22:21:22.689524"
+  },
+  {
+    "iteration": 7,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter7_20251210_222126.py",
+    "changes": [
+      "risk_per_trade_pct -> 1.15"
+    ],
+    "timestamp": "2025-12-10T22:21:26.662566"
+  },
+  {
+    "iteration": 8,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter8_20251210_222130.py",
+    "changes": [
+      "risk_per_trade_pct -> 0.9999999999999999"
+    ],
+    "timestamp": "2025-12-10T22:21:30.451489"
+  },
+  {
+    "iteration": 9,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter9_20251210_222134.py",
+    "changes": [
+      "risk_per_trade_pct -> 1.25"
+    ],
+    "timestamp": "2025-12-10T22:21:34.267717"
+  },
+  {
+    "iteration": 10,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter10_20251210_222138.py",
+    "changes": [
+      "risk_per_trade_pct -> 1.1"
+    ],
+    "timestamp": "2025-12-10T22:21:38.091401"
+  },
+  {
+    "iteration": 11,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter11_20251210_222142.py",
+    "changes": [
+      "risk_per_trade_pct -> 0.9500000000000001"
+    ],
+    "timestamp": "2025-12-10T22:21:42.027450"
+  },
+  {
+    "iteration": 12,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter12_20251210_222146.py",
+    "changes": [
+      "risk_per_trade_pct -> 0.8"
+    ],
+    "timestamp": "2025-12-10T22:21:46.003928"
+  },
+  {
+    "iteration": 13,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter13_20251210_222149.py",
+    "changes": [
+      "risk_per_trade_pct -> 1.05"
+    ],
+    "timestamp": "2025-12-10T22:21:49.888062"
+  },
+  {
+    "iteration": 14,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter14_20251210_222153.py",
+    "changes": [
+      "risk_per_trade_pct -> 0.9"
+    ],
+    "timestamp": "2025-12-10T22:21:53.867103"
   }
 ]

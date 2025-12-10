@@ -30,7 +30,7 @@ class FTMO10KConfig:
     total_dd_emergency_pct: float = 7.0  # Emergency mode at 7% total DD
 
     # === POSITION SIZING (Match /backtest command) ===
-    risk_per_trade_pct: float = 0.9  # Match /backtest command (1% = $100 per trade on 10K)
+    risk_per_trade_pct: float = 0.6  # Match /backtest command (1% = $100 per trade on 10K)
     max_risk_aggressive_pct: float = 1.0  # Aggressive mode: 1%
     max_risk_normal_pct: float = 0.75  # Normal mode: 0.75%
     max_risk_conservative_pct: float = 0.5  # Conservative mode: 0.5%
@@ -101,8 +101,8 @@ class FTMO10KConfig:
 
     def __post_init__(self):
         """Validate configuration parameters"""
-        if self.risk_per_trade_pct > 1.5:  # Allow optimizer some room
-            raise ValueError("Risk per trade cannot exceed 1.5% for FTMO 10K")
+        if self.risk_per_trade_pct > 1.0:
+            raise ValueError("Risk per trade cannot exceed 1% for ultra-conservative FTMO 10K")
         if self.max_daily_loss_pct > 5.0:
             raise ValueError("Max daily loss cannot exceed 5% for FTMO")
         if self.max_total_drawdown_pct > 10.0:

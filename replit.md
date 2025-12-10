@@ -217,6 +217,15 @@ Start-ScheduledTask -TaskName TradrLive
 ## Recent Changes
 
 ### December 2025
+- **CRITICAL FIX**: Sequential Partial Take-Profit Logic in `strategy_core.py`
+  - Fixed bug where TP2 could hit without TP1 hitting first
+  - Now properly calculates weighted partial profits:
+    - TP1: 30% of position closed at TP1
+    - TP2: 40% of position closed at TP2 (after TP1)
+    - TP3/Trail: 30% remaining at TP3 or trailing stop
+  - Before fix: TP2 exit = 2.0R (entire position)
+  - After fix: TP2 exit = 0.30×1.0R + 0.40×2.0R + 0.30×0R = 1.10R (realistic)
+  - Partial percentages configurable via `StrategyParams.tp1_close_pct`, etc.
 - **UPDATED**: Enhanced `ftmo_challenge_analyzer.py` with advanced success criteria
   - Added per-asset win rate tracking (minimum 50% per asset with 5+ trades)
   - Added minimum $80 average profit per winning trade validation
