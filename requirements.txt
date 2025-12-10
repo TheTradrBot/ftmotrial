@@ -12,3 +12,10 @@ numpy
 pandas
 python-dotenv
 requests
+discord.py
+flask
+flask-cors
+numpy
+pandas
+python-dotenv
+requests
