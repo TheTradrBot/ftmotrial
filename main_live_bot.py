@@ -77,6 +77,7 @@ class PendingSetup:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 from config import SIGNAL_MODE, MIN_CONFLUENCE_STANDARD, MIN_CONFLUENCE_AGGRESSIVE
+from config import FOREX_PAIRS, METALS, INDICES, CRYPTO_ASSETS
 from symbol_mapping import ALL_TRADABLE_OANDA, ftmo_to_oanda, oanda_to_ftmo
 from ftmo_config import FTMO_CONFIG
 
@@ -89,7 +90,8 @@ SCAN_INTERVAL_HOURS = int(os.getenv("SCAN_INTERVAL_HOURS", "4"))
 # Use EXACT same confluence as backtest_live_bot.py
 MIN_CONFLUENCE = FTMO_CONFIG.min_confluence_score  # 5/7 as per ftmo_config.py
 
-TRADABLE_SYMBOLS = ALL_TRADABLE_OANDA  # Trade all 42 assets (same as backtest)
+# Use EXACT same assets as Discord /backtest command (34 assets)
+TRADABLE_SYMBOLS = FOREX_PAIRS + METALS + INDICES + CRYPTO_ASSETS  # 28 forex + 2 metals + 2 indices + 2 crypto = 34 assets
 
 log = setup_logger("tradr", log_file="logs/tradr_live.log")
 running = True
