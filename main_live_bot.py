@@ -257,7 +257,7 @@ class LiveTradingBot:
             
             if CHALLENGE_MODE:
                 from ftmo_config import FTMO_CONFIG
-                log.info("Initializing Challenge Risk Manager (FTMO 10K COMPLIANT)...")
+                log.info("Initializing Challenge Risk Manager (FTMO 200K COMPLIANT)...")
                 config = ChallengeConfig(
                     enabled=True,
                     phase=self.risk_manager.state.phase,
@@ -640,11 +640,11 @@ class LiveTradingBot:
         """
         Place order for a validated setup.
         
-        FTMO 10K OPTIMIZED:
+        FTMO 200K OPTIMIZED:
         - Uses market order when price is at entry (like backtest instant fill)
         - Uses pending order when price is near but not at entry
         - Validates all risk limits before placing
-        - Calculates proper lot size for 10K account
+        - Calculates proper lot size for 200K account
         """
         from ftmo_config import FTMO_CONFIG, get_pip_size, get_sl_limits
         

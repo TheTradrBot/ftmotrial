@@ -1,6 +1,6 @@
 """
-FTMO 10K Configuration - Ultra-Conservative Settings
-Trading parameters optimized for FTMO 10K challenge with maximum safety
+FTMO 200K Configuration - Ultra-Conservative Settings
+Trading parameters optimized for FTMO 200K challenge with maximum safety
 """
 
 from dataclasses import dataclass, field
@@ -9,10 +9,10 @@ from typing import List, Tuple
 
 @dataclass
 class FTMO10KConfig:
-    """FTMO 10K Challenge Configuration - Ultra-Conservative Approach"""
+    """FTMO 200K Challenge Configuration - Ultra-Conservative Approach"""
 
     # === ACCOUNT SETTINGS ===
-    account_size: float = 10000.0  # FTMO 10K challenge account size
+    account_size: float = 200000.0  # FTMO 200K challenge account size
     account_currency: str = "USD"
 
     # === FTMO RULES ===
@@ -30,7 +30,7 @@ class FTMO10KConfig:
     total_dd_emergency_pct: float = 7.0  # Emergency mode at 7% total DD
 
     # === POSITION SIZING (Match /backtest command) ===
-    risk_per_trade_pct: float = 0.9500000000000014  # Match /backtest command (1% = $100 per trade on 10K)
+    risk_per_trade_pct: float = 0.9500000000000014  # Match /backtest command (1% = $2000 per trade on 200K)
     max_risk_aggressive_pct: float = 1.0  # Aggressive mode: 1%
     max_risk_normal_pct: float = 0.75  # Normal mode: 0.75%
     max_risk_conservative_pct: float = 0.5  # Conservative mode: 0.5%
@@ -133,7 +133,7 @@ class FTMO10KConfig:
     def __post_init__(self):
         """Validate configuration parameters"""
         if self.risk_per_trade_pct > 1.5:  # Allow optimizer some room
-            raise ValueError("Risk per trade cannot exceed 1.5% for FTMO 10K")
+            raise ValueError("Risk per trade cannot exceed 1.5% for FTMO 200K")
         if self.max_daily_loss_pct > 5.0:
             raise ValueError("Max daily loss cannot exceed 5% for FTMO")
         if self.max_total_drawdown_pct > 10.0:

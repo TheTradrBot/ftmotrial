@@ -651,7 +651,7 @@ class ChallengeSequencer:
     Starts new challenge immediately after completing Step 1 + Step 2.
     """
     
-    ACCOUNT_SIZE = 10000.0
+    ACCOUNT_SIZE = 200000.0
     STEP1_PROFIT_TARGET_PCT = 10.0
     STEP2_PROFIT_TARGET_PCT = 5.0
     MAX_DAILY_LOSS_PCT = 5.0
