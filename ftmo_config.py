@@ -153,23 +153,20 @@ class FTMO10KConfig:
         Returns:
             Risk percentage to use for next trade
         """
-        # Ultra-safe mode if in daily profit (loss is negative/zero)
-        if daily_loss_pct <= 0:  # In profit or breakeven
+        # Emergency mode - approaching limits, use ultra-safe
+        if daily_loss_pct >= self.daily_loss_reduce_pct or total_dd_pct >= self.total_dd_emergency_pct:
             return self.ultra_safe_risk_pct
 
-        # Emergency mode - approaching limits
-        if daily_loss_pct >= self.daily_loss_reduce_pct or total_dd_pct >= self.total_dd_emergency_pct:
+        # Warning mode - reduce risk
+        if daily_loss_pct >= self.daily_loss_warning_pct or total_dd_pct >= self.total_dd_warning_pct:
             return self.max_risk_conservative_pct
 
-        # Warning mode
-        if daily_loss_pct >= self.daily_loss_warning_pct or total_dd_pct >= self.total_dd_warning_pct:
+        # Moderate loss/DD - use normal risk
+        if daily_loss_pct >= 2.0 or total_dd_pct >= 3.0:
             return self.max_risk_normal_pct
 
-        # Normal/aggressive mode (still conservative)
-        if daily_loss_pct < 2.0 and total_dd_pct < 3.0:
-            return self.max_risk_aggressive_pct
-
-        return self.risk_per_trade_pct
+        # Low or no loss - use aggressive/full risk
+        return self.max_risk_aggressive_pct
 
     def get_max_trades(self, profit_pct: float) -> int:
         """

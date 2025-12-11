@@ -1,0 +1,394 @@
+[config] ✓ Loaded environment from C:\mt5bot-new\.env
+2025-12-10 16:01:10 | INFO     | tradr | Loaded 0 pending setups from file
+2025-12-10 16:01:10 | INFO     | tradr | Challenge already active (Phase 1) - continuing...
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | TRADR BOT - LIVE TRADING (FTMO COMPLIANT)
+2025-12-10 16:01:10 | INFO     | tradr | *** CHALLENGE MODE: ELITE PROTECTION ENABLED ***
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | Using SAME strategy as backtests (strategy_core.py)
+2025-12-10 16:01:10 | INFO     | tradr | FTMO Risk Limits:
+2025-12-10 16:01:10 | INFO     | tradr |   - Max single trade risk: 0.75% (Challenge Mode)
+2025-12-10 16:01:10 | INFO     | tradr |   - Max cumulative risk: 3.5%
+2025-12-10 16:01:10 | INFO     | tradr |   - Emergency close at: 4.5% daily loss / 8% drawdown
+2025-12-10 16:01:10 | INFO     | tradr |   - Partial TPs: 45% TP1, 30% TP2, 25% TP3 (Challenge Mode)
+2025-12-10 16:01:10 | INFO     | tradr | Server:
+2025-12-10 16:01:10 | INFO     | tradr | Login: 1512190437
+2025-12-10 16:01:10 | INFO     | tradr | Scan Interval: 4 hours
+2025-12-10 16:01:10 | INFO     | tradr | Validate Interval: 15 minutes
+2025-12-10 16:01:10 | INFO     | tradr | P/L Monitor Interval: 30 seconds (elite protection)
+2025-12-10 16:01:10 | INFO     | tradr | Strategy Mode: standard
+2025-12-10 16:01:10 | INFO     | tradr | Min Confluence: 4/7
+2025-12-10 16:01:10 | INFO     | tradr | Symbols: 34
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | CONNECTING TO MT5
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+[MT5] Connected: 1512190437 @ FTMO-Demo
+[MT5] Balance: $9,737.87, Equity: $9,737.87
+2025-12-10 16:01:10 | INFO     | tradr | Connected: 1512190437 @ FTMO-Demo
+2025-12-10 16:01:10 | INFO     | tradr | Balance: $9,737.87
+2025-12-10 16:01:10 | INFO     | tradr | Equity: $9,737.87
+2025-12-10 16:01:10 | INFO     | tradr | Leverage: 1:100
+2025-12-10 16:01:10 | INFO     | tradr |
+======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | DISCOVERING BROKER SYMBOLS
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | Broker has 131 total symbols
+2025-12-10 16:01:10 | INFO     | tradr | ✓ EUR_USD         (OANDA) -> EURUSD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ GBP_USD         (OANDA) -> GBPUSD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ USD_JPY         (OANDA) -> USDJPY (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ USD_CHF         (OANDA) -> USDCHF (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ USD_CAD         (OANDA) -> USDCAD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ AUD_USD         (OANDA) -> AUDUSD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ NZD_USD         (OANDA) -> NZDUSD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ EUR_GBP         (OANDA) -> EURGBP (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ EUR_JPY         (OANDA) -> EURJPY (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ EUR_CHF         (OANDA) -> EURCHF (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ EUR_AUD         (OANDA) -> EURAUD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ EUR_CAD         (OANDA) -> EURCAD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ EUR_NZD         (OANDA) -> EURNZD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ GBP_JPY         (OANDA) -> GBPJPY (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ GBP_CHF         (OANDA) -> GBPCHF (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ GBP_AUD         (OANDA) -> GBPAUD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ GBP_CAD         (OANDA) -> GBPCAD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ GBP_NZD         (OANDA) -> GBPNZD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ AUD_JPY         (OANDA) -> AUDJPY (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ AUD_CHF         (OANDA) -> AUDCHF (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ AUD_CAD         (OANDA) -> AUDCAD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ AUD_NZD         (OANDA) -> AUDNZD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ NZD_JPY         (OANDA) -> NZDJPY (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ NZD_CHF         (OANDA) -> NZDCHF (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ NZD_CAD         (OANDA) -> NZDCAD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ CAD_JPY         (OANDA) -> CADJPY (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ CAD_CHF         (OANDA) -> CADCHF (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ CHF_JPY         (OANDA) -> CHFJPY (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ XAU_USD         (OANDA) -> XAUUSD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ XAG_USD         (OANDA) -> XAGUSD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ SPX500_USD      (OANDA) -> US500.cash (FTMO fallback)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ NAS100_USD      (OANDA) -> US100.cash (FTMO fallback)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ BTC_USD         (OANDA) -> BTCUSD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ ETH_USD         (OANDA) -> ETHUSD (FTMO)
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | Mapped 34/34 symbols
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr |
+======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | VALIDATING SYMBOL MAPPING
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | ✓ EUR_USD -> EURUSD (digits: 5, spread: 0)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ GBP_USD -> GBPUSD (digits: 5, spread: 8)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ USD_JPY -> USDJPY (digits: 3, spread: 13)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ USD_CHF -> USDCHF (digits: 5, spread: 7)
+2025-12-10 16:01:10 | INFO     | tradr | ✓ USD_CAD -> USDCAD (digits: 5, spread: 7)
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | Syncing risk manager with MT5 account...
+2025-12-10 16:01:10 | INFO     | tradr | Risk manager synced: Balance=$9,737.87, Equity=$9,737.87
+2025-12-10 16:01:10 | INFO     | tradr | Initializing Challenge Risk Manager (FTMO 10K COMPLIANT)...
+[RISK] Loaded state from challenge_risk_state.json
+[RISK] New trading day: 2025-12-11
+[RISK] ======================================================================
+[RISK] CHALLENGE RISK MANAGER INITIALIZED
+[RISK]   Mode: ENABLED
+[RISK]   Phase: 1
+[RISK]   Account Size: $9,737.87
+[RISK]   Max Daily Loss: 5.0%
+[RISK]   Max Drawdown: 10.0%
+[RISK]   Max Risk/Trade: 0.9500000000000014%
+[RISK]   Max Concurrent Trades: 2
+[RISK] ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | Challenge Risk Manager initialized with ELITE PROTECTION
+2025-12-10 16:01:10 | INFO     | tradr | Starting trading loop...
+2025-12-10 16:01:10 | INFO     | tradr | Press Ctrl+C to stop
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | MARKET SCAN - 2025-12-11 00:01 UTC
+2025-12-10 16:01:10 | INFO     | tradr | Strategy Mode: standard (Min Confluence: 4/7)
+2025-12-10 16:01:10 | INFO     | tradr | Using PENDING ORDERS (like backtest)
+2025-12-10 16:01:10 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:10 | INFO     | tradr | [EUR_USD] Scanning (OANDA: EUR_USD, FTMO: EURUSD)...
+2025-12-10 16:01:10 | INFO     | tradr | [EUR_USD] BULLISH | Conf: 5/7 | Quality: 3 | Status: active
+2025-12-10 16:01:10 | INFO     | tradr | [EUR_USD] Entry proximity OK: 1.40R from current price
+2025-12-10 16:01:10 | INFO     | tradr | [EUR_USD] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:10 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:10 | INFO     | tradr |   Confluence: 5/7
+2025-12-10 16:01:10 | INFO     | tradr |   Current Price: 1.17001
+2025-12-10 16:01:10 | INFO     | tradr |   Entry: 1.15504 (1.40R away)
+2025-12-10 16:01:10 | INFO     | tradr |   SL: 1.14431 (1073.0 pips)
+2025-12-10 16:01:10 | INFO     | tradr |   TP1: 1.17113 (1.5R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP2: 1.18723 (3.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP3: 1.20869 (5.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP4: 1.23015 (7.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP5: 1.26234 (10.0R)
+2025-12-10 16:01:10 | INFO     | tradr | [EUR_USD] Risk calculation:
+2025-12-10 16:01:10 | INFO     | tradr |   Balance: $9737.87
+2025-12-10 16:01:10 | INFO     | tradr |   Risk %: 0.25% (daily loss: 0.0%, DD: 0.0%)
+2025-12-10 16:01:10 | INFO     | tradr |   Risk $: $24.34
+2025-12-10 16:01:10 | INFO     | tradr |   Lot size: 0.01
+2025-12-10 16:01:10 | INFO     | tradr | [EUR_USD] Price 1.40R from entry - using PENDING ORDER
+2025-12-10 16:01:10 | INFO     | tradr | [EUR_USD] Placing PENDING ORDER:
+2025-12-10 16:01:10 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:10 | INFO     | tradr |   Entry Level: 1.15504
+2025-12-10 16:01:10 | INFO     | tradr |   SL: 1.14431
+2025-12-10 16:01:10 | INFO     | tradr |   TP1: 1.17113
+2025-12-10 16:01:10 | ERROR    | tradr | [EUR_USD] Error during scan: Invalid format specifier '.5f if tp5 else 'N/A'' f
+or object of type 'float'
+2025-12-10 16:01:10 | INFO     | tradr | [GBP_USD] Scanning (OANDA: GBP_USD, FTMO: GBPUSD)...
+2025-12-10 16:01:10 | INFO     | tradr | [GBP_USD] BULLISH | Conf: 4/7 | Quality: 2 | Status: active
+2025-12-10 16:01:10 | INFO     | tradr | [GBP_USD] Entry proximity OK: 1.28R from current price
+2025-12-10 16:01:10 | INFO     | tradr | [GBP_USD] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:10 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:10 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:10 | INFO     | tradr |   Current Price: 1.33867
+2025-12-10 16:01:10 | INFO     | tradr |   Entry: 1.31701 (1.28R away)
+2025-12-10 16:01:10 | INFO     | tradr |   SL: 1.30014 (1686.9 pips)
+2025-12-10 16:01:10 | INFO     | tradr |   TP1: 1.34231 (1.5R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP2: 1.36761 (3.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP3: 1.40135 (5.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP4: 1.43509 (7.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP5: 1.48569 (10.0R)
+2025-12-10 16:01:10 | INFO     | tradr | [GBP_USD] Risk calculation:
+2025-12-10 16:01:10 | INFO     | tradr |   Balance: $9737.87
+2025-12-10 16:01:10 | INFO     | tradr |   Risk %: 0.25% (daily loss: 0.0%, DD: 0.0%)
+2025-12-10 16:01:10 | INFO     | tradr |   Risk $: $24.34
+2025-12-10 16:01:10 | INFO     | tradr |   Lot size: 0.01
+2025-12-10 16:01:10 | INFO     | tradr | [GBP_USD] Price 1.28R from entry - using PENDING ORDER
+2025-12-10 16:01:10 | INFO     | tradr | [GBP_USD] Placing PENDING ORDER:
+2025-12-10 16:01:10 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:10 | INFO     | tradr |   Entry Level: 1.31701
+2025-12-10 16:01:10 | INFO     | tradr |   SL: 1.30014
+2025-12-10 16:01:10 | INFO     | tradr |   TP1: 1.34231
+2025-12-10 16:01:10 | ERROR    | tradr | [GBP_USD] Error during scan: Invalid format specifier '.5f if tp5 else 'N/A'' f
+or object of type 'float'
+2025-12-10 16:01:10 | INFO     | tradr | [USD_JPY] Scanning (OANDA: USD_JPY, FTMO: USDJPY)...
+2025-12-10 16:01:10 | INFO     | tradr | [USD_JPY] BULLISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:10 | INFO     | tradr | [USD_JPY] Entry proximity OK: 0.39R from current price
+2025-12-10 16:01:10 | INFO     | tradr | [USD_JPY] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:10 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:10 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:10 | INFO     | tradr |   Current Price: 155.70900
+2025-12-10 16:01:10 | INFO     | tradr |   Entry: 154.75318 (0.39R away)
+2025-12-10 16:01:10 | INFO     | tradr |   SL: 152.29732 (2455.9 pips)
+2025-12-10 16:01:10 | INFO     | tradr |   TP1: 158.43697 (1.5R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP2: 162.12076 (3.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP3: 167.03249 (5.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP4: 171.94421 (7.0R)
+2025-12-10 16:01:10 | INFO     | tradr |   TP5: 179.31179 (10.0R)
+2025-12-10 16:01:10 | INFO     | tradr | [USD_JPY] Risk calculation:
+2025-12-10 16:01:10 | INFO     | tradr |   Balance: $9737.87
+2025-12-10 16:01:10 | INFO     | tradr |   Risk %: 0.25% (daily loss: 0.0%, DD: 0.0%)
+2025-12-10 16:01:10 | INFO     | tradr |   Risk $: $24.34
+2025-12-10 16:01:10 | INFO     | tradr |   Lot size: 0.01
+2025-12-10 16:01:10 | INFO     | tradr | [USD_JPY] Price at entry (0.39R) - using MARKET ORDER
+2025-12-10 16:01:11 | INFO     | tradr | [USD_JPY] MARKET ORDER FILLED!
+2025-12-10 16:01:11 | INFO     | tradr |   Order Ticket: 362556149
+2025-12-10 16:01:11 | INFO     | tradr |   Fill Price: 155.72200
+2025-12-10 16:01:11 | INFO     | tradr |   Volume: 0.01
+2025-12-10 16:01:11 | INFO     | tradr | [USD_CHF] Scanning (OANDA: USD_CHF, FTMO: USDCHF)...
+2025-12-10 16:01:11 | INFO     | tradr | [USD_CHF] BEARISH | Conf: 7/7 | Quality: 5 | Status: active
+2025-12-10 16:01:11 | INFO     | tradr | [USD_CHF] Entry proximity OK: 0.31R from current price
+2025-12-10 16:01:11 | INFO     | tradr | [USD_CHF] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:11 | INFO     | tradr |   Direction: BEARISH
+2025-12-10 16:01:11 | INFO     | tradr |   Confluence: 7/7
+2025-12-10 16:01:11 | INFO     | tradr |   Current Price: 0.79935
+2025-12-10 16:01:11 | INFO     | tradr |   Entry: 0.80301 (0.31R away)
+2025-12-10 16:01:11 | INFO     | tradr |   SL: 0.81475 (1173.9 pips)
+2025-12-10 16:01:11 | INFO     | tradr |   TP1: 0.78540 (1.5R)
+2025-12-10 16:01:11 | INFO     | tradr |   TP2: 0.76779 (3.0R)
+2025-12-10 16:01:11 | INFO     | tradr |   TP3: 0.74431 (5.0R)
+2025-12-10 16:01:11 | INFO     | tradr |   TP4: 0.72084 (7.0R)
+2025-12-10 16:01:11 | INFO     | tradr |   TP5: 0.68562 (10.0R)
+2025-12-10 16:01:11 | INFO     | tradr | [USD_CHF] Risk calculation:
+2025-12-10 16:01:11 | INFO     | tradr |   Balance: $9737.85
+2025-12-10 16:01:11 | INFO     | tradr |   Risk %: 1.00% (daily loss: 0.0%, DD: 0.0%)
+2025-12-10 16:01:11 | INFO     | tradr |   Risk $: $97.38
+2025-12-10 16:01:11 | INFO     | tradr |   Lot size: 0.01
+2025-12-10 16:01:11 | INFO     | tradr | [USD_CHF] Price at entry (0.31R) - using MARKET ORDER
+2025-12-10 16:01:11 | INFO     | tradr | [USD_CHF] MARKET ORDER FILLED!
+2025-12-10 16:01:11 | INFO     | tradr |   Order Ticket: 362556150
+2025-12-10 16:01:11 | INFO     | tradr |   Fill Price: 0.79928
+2025-12-10 16:01:11 | INFO     | tradr |   Volume: 0.01
+2025-12-10 16:01:12 | INFO     | tradr | [USD_CAD] Scanning (OANDA: USD_CAD, FTMO: USDCAD)...
+2025-12-10 16:01:12 | INFO     | tradr | [USD_CAD] BEARISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:12 | INFO     | tradr | [USD_CAD] Entry too far: 1.40439 is 2.04R from current 1.37894 (max: 2.0R)
+2025-12-10 16:01:13 | INFO     | tradr | [AUD_USD] Scanning (OANDA: AUD_USD, FTMO: AUDUSD)...
+2025-12-10 16:01:13 | INFO     | tradr | [AUD_USD] BULLISH | Conf: 2/7 | Quality: 1 | Status: scan_only
+2025-12-10 16:01:13 | INFO     | tradr | [NZD_USD] Scanning (OANDA: NZD_USD, FTMO: NZDUSD)...
+2025-12-10 16:01:13 | INFO     | tradr | [NZD_USD] BULLISH | Conf: 2/7 | Quality: 1 | Status: scan_only
+2025-12-10 16:01:14 | INFO     | tradr | [EUR_GBP] Scanning (OANDA: EUR_GBP, FTMO: EURGBP)...
+2025-12-10 16:01:14 | INFO     | tradr | [EUR_GBP] BEARISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:14 | INFO     | tradr | [EUR_JPY] Scanning (OANDA: EUR_JPY, FTMO: EURJPY)...
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_JPY] BULLISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_JPY] Entry proximity OK: 1.41R from current price
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_JPY] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:15 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:15 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:15 | INFO     | tradr |   Current Price: 182.16800
+2025-12-10 16:01:15 | INFO     | tradr |   Entry: 178.10489 (1.41R away)
+2025-12-10 16:01:15 | INFO     | tradr |   SL: 175.21705 (2887.8 pips)
+2025-12-10 16:01:15 | INFO     | tradr |   TP1: 182.43665 (1.5R)
+2025-12-10 16:01:15 | INFO     | tradr |   TP2: 186.76841 (3.0R)
+2025-12-10 16:01:15 | INFO     | tradr |   TP3: 192.54408 (5.0R)
+2025-12-10 16:01:15 | INFO     | tradr |   TP4: 198.31976 (7.0R)
+2025-12-10 16:01:15 | INFO     | tradr |   TP5: 206.98327 (10.0R)
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_JPY] Max trades reached: 2/2
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_CHF] Scanning (OANDA: EUR_CHF, FTMO: EURCHF)...
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_CHF] BULLISH | Conf: 4/7 | Quality: 2 | Status: active
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_CHF] Entry proximity OK: 0.89R from current price
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_CHF] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:15 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:15 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:15 | INFO     | tradr |   Current Price: 0.93512
+2025-12-10 16:01:15 | INFO     | tradr |   Entry: 0.92618 (0.89R away)
+2025-12-10 16:01:15 | INFO     | tradr |   SL: 0.91616 (1002.1 pips)
+2025-12-10 16:01:15 | INFO     | tradr |   TP1: 0.94121 (1.5R)
+2025-12-10 16:01:15 | INFO     | tradr |   TP2: 0.95624 (3.0R)
+2025-12-10 16:01:15 | INFO     | tradr |   TP3: 0.97628 (5.0R)
+2025-12-10 16:01:15 | INFO     | tradr |   TP4: 0.99632 (7.0R)
+2025-12-10 16:01:15 | INFO     | tradr |   TP5: 1.02639 (10.0R)
+2025-12-10 16:01:15 | INFO     | tradr | [EUR_CHF] Max trades reached: 2/2
+2025-12-10 16:01:16 | INFO     | tradr | [EUR_AUD] Scanning (OANDA: EUR_AUD, FTMO: EURAUD)...
+2025-12-10 16:01:16 | INFO     | tradr | [EUR_AUD] BEARISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:16 | INFO     | tradr | [EUR_AUD] Entry proximity OK: 1.36R from current price
+2025-12-10 16:01:16 | INFO     | tradr | [EUR_AUD] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:16 | INFO     | tradr |   Direction: BEARISH
+2025-12-10 16:01:16 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:16 | INFO     | tradr |   Current Price: 1.75357
+2025-12-10 16:01:16 | INFO     | tradr |   Entry: 1.78190 (1.36R away)
+2025-12-10 16:01:16 | INFO     | tradr |   SL: 1.80279 (2089.3 pips)
+2025-12-10 16:01:16 | INFO     | tradr |   TP1: 1.75056 (1.5R)
+2025-12-10 16:01:16 | INFO     | tradr |   TP2: 1.71922 (3.0R)
+2025-12-10 16:01:16 | INFO     | tradr |   TP3: 1.67743 (5.0R)
+2025-12-10 16:01:16 | INFO     | tradr |   TP4: 1.63564 (7.0R)
+2025-12-10 16:01:16 | INFO     | tradr |   TP5: 1.57296 (10.0R)
+2025-12-10 16:01:16 | INFO     | tradr | [EUR_AUD] Max trades reached: 2/2
+2025-12-10 16:01:16 | INFO     | tradr | [EUR_CAD] Scanning (OANDA: EUR_CAD, FTMO: EURCAD)...
+2025-12-10 16:01:16 | INFO     | tradr | [EUR_CAD] BEARISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:17 | INFO     | tradr | [EUR_NZD] Scanning (OANDA: EUR_NZD, FTMO: EURNZD)...
+2025-12-10 16:01:17 | INFO     | tradr | [EUR_NZD] BEARISH | Conf: 2/7 | Quality: 1 | Status: scan_only
+2025-12-10 16:01:18 | INFO     | tradr | [GBP_JPY] Scanning (OANDA: GBP_JPY, FTMO: GBPJPY)...
+2025-12-10 16:01:18 | INFO     | tradr | [GBP_JPY] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:18 | INFO     | tradr | [GBP_CHF] Scanning (OANDA: GBP_CHF, FTMO: GBPCHF)...
+2025-12-10 16:01:18 | INFO     | tradr | [GBP_CHF] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:19 | INFO     | tradr | [GBP_AUD] Scanning (OANDA: GBP_AUD, FTMO: GBPAUD)...
+2025-12-10 16:01:19 | INFO     | tradr | [GBP_AUD] BEARISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:19 | INFO     | tradr | [GBP_CAD] Scanning (OANDA: GBP_CAD, FTMO: GBPCAD)...
+2025-12-10 16:01:20 | INFO     | tradr | [GBP_CAD] BEARISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:20 | INFO     | tradr | [GBP_NZD] Scanning (OANDA: GBP_NZD, FTMO: GBPNZD)...
+2025-12-10 16:01:20 | INFO     | tradr | [GBP_NZD] BEARISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:21 | INFO     | tradr | [AUD_JPY] Scanning (OANDA: AUD_JPY, FTMO: AUDJPY)...
+2025-12-10 16:01:21 | INFO     | tradr | [AUD_JPY] BULLISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:21 | INFO     | tradr | [AUD_JPY] Entry too far: 100.22127 is 2.01R from current 103.88700 (max: 2.0R)
+2025-12-10 16:01:21 | INFO     | tradr | [AUD_CHF] Scanning (OANDA: AUD_CHF, FTMO: AUDCHF)...
+2025-12-10 16:01:21 | INFO     | tradr | [AUD_CHF] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:22 | INFO     | tradr | [AUD_CAD] Scanning (OANDA: AUD_CAD, FTMO: AUDCAD)...
+2025-12-10 16:01:22 | INFO     | tradr | [AUD_CAD] BULLISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:22 | INFO     | tradr | [AUD_CAD] Entry proximity OK: 0.67R from current price
+2025-12-10 16:01:22 | INFO     | tradr | [AUD_CAD] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:22 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:22 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:22 | INFO     | tradr |   Current Price: 0.91989
+2025-12-10 16:01:22 | INFO     | tradr |   Entry: 0.91325 (0.67R away)
+2025-12-10 16:01:22 | INFO     | tradr |   SL: 0.90329 (996.0 pips)
+2025-12-10 16:01:22 | INFO     | tradr |   TP1: 0.92819 (1.5R)
+2025-12-10 16:01:22 | INFO     | tradr |   TP2: 0.94313 (3.0R)
+2025-12-10 16:01:22 | INFO     | tradr |   TP3: 0.96305 (5.0R)
+2025-12-10 16:01:22 | INFO     | tradr |   TP4: 0.98297 (7.0R)
+2025-12-10 16:01:22 | INFO     | tradr |   TP5: 1.01285 (10.0R)
+2025-12-10 16:01:22 | INFO     | tradr | [AUD_CAD] Max trades reached: 2/2
+2025-12-10 16:01:22 | INFO     | tradr | [AUD_NZD] Scanning (OANDA: AUD_NZD, FTMO: AUDNZD)...
+2025-12-10 16:01:22 | INFO     | tradr | [AUD_NZD] BULLISH | Conf: 5/7 | Quality: 4 | Status: active
+2025-12-10 16:01:22 | INFO     | tradr | [AUD_NZD] Entry proximity OK: 0.34R from current price
+2025-12-10 16:01:23 | INFO     | tradr | [AUD_NZD] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:23 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:23 | INFO     | tradr |   Confluence: 5/7
+2025-12-10 16:01:23 | INFO     | tradr |   Current Price: 1.14730
+2025-12-10 16:01:23 | INFO     | tradr |   Entry: 1.14189 (0.34R away)
+2025-12-10 16:01:23 | INFO     | tradr |   SL: 1.12589 (1599.5 pips)
+2025-12-10 16:01:23 | INFO     | tradr |   TP1: 1.16588 (1.5R)
+2025-12-10 16:01:23 | INFO     | tradr |   TP2: 1.18987 (3.0R)
+2025-12-10 16:01:23 | INFO     | tradr |   TP3: 1.22186 (5.0R)
+2025-12-10 16:01:23 | INFO     | tradr |   TP4: 1.25385 (7.0R)
+2025-12-10 16:01:23 | INFO     | tradr |   TP5: 1.30183 (10.0R)
+2025-12-10 16:01:23 | INFO     | tradr | [AUD_NZD] Max trades reached: 2/2
+2025-12-10 16:01:23 | INFO     | tradr | [NZD_JPY] Scanning (OANDA: NZD_JPY, FTMO: NZDJPY)...
+2025-12-10 16:01:23 | INFO     | tradr | [NZD_JPY] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:24 | INFO     | tradr | [NZD_CHF] Scanning (OANDA: NZD_CHF, FTMO: NZDCHF)...
+2025-12-10 16:01:24 | INFO     | tradr | [NZD_CHF] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:24 | INFO     | tradr | [NZD_CAD] Scanning (OANDA: NZD_CAD, FTMO: NZDCAD)...
+2025-12-10 16:01:24 | INFO     | tradr | [NZD_CAD] BULLISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:24 | INFO     | tradr | [NZD_CAD] Entry proximity OK: 0.78R from current price
+2025-12-10 16:01:24 | INFO     | tradr | [NZD_CAD] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:24 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:24 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:24 | INFO     | tradr |   Current Price: 0.80170
+2025-12-10 16:01:24 | INFO     | tradr |   Entry: 0.79372 (0.78R away)
+2025-12-10 16:01:24 | INFO     | tradr |   SL: 0.78347 (1025.3 pips)
+2025-12-10 16:01:24 | INFO     | tradr |   TP1: 0.80910 (1.5R)
+2025-12-10 16:01:24 | INFO     | tradr |   TP2: 0.82448 (3.0R)
+2025-12-10 16:01:24 | INFO     | tradr |   TP3: 0.84499 (5.0R)
+2025-12-10 16:01:24 | INFO     | tradr |   TP4: 0.86549 (7.0R)
+2025-12-10 16:01:24 | INFO     | tradr |   TP5: 0.89625 (10.0R)
+2025-12-10 16:01:24 | INFO     | tradr | [NZD_CAD] Max trades reached: 2/2
+2025-12-10 16:01:25 | INFO     | tradr | [CAD_JPY] Scanning (OANDA: CAD_JPY, FTMO: CADJPY)...
+2025-12-10 16:01:25 | INFO     | tradr | [CAD_JPY] BULLISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:25 | INFO     | tradr | [CAD_JPY] Entry proximity OK: 1.60R from current price
+2025-12-10 16:01:25 | INFO     | tradr | [CAD_JPY] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:25 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:25 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:25 | INFO     | tradr |   Current Price: 112.91500
+2025-12-10 16:01:25 | INFO     | tradr |   Entry: 110.60010 (1.60R away)
+2025-12-10 16:01:25 | INFO     | tradr |   SL: 109.15515 (1444.9 pips)
+2025-12-10 16:01:25 | INFO     | tradr |   TP1: 112.76751 (1.5R)
+2025-12-10 16:01:25 | INFO     | tradr |   TP2: 114.93493 (3.0R)
+2025-12-10 16:01:25 | INFO     | tradr |   TP3: 117.82482 (5.0R)
+2025-12-10 16:01:25 | INFO     | tradr |   TP4: 120.71471 (7.0R)
+2025-12-10 16:01:25 | INFO     | tradr |   TP5: 125.04955 (10.0R)
+2025-12-10 16:01:25 | INFO     | tradr | [CAD_JPY] Max trades reached: 2/2
+2025-12-10 16:01:26 | INFO     | tradr | [CAD_CHF] Scanning (OANDA: CAD_CHF, FTMO: CADCHF)...
+2025-12-10 16:01:26 | INFO     | tradr | [CAD_CHF] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:26 | INFO     | tradr | [CHF_JPY] Scanning (OANDA: CHF_JPY, FTMO: CHFJPY)...
+2025-12-10 16:01:26 | INFO     | tradr | [CHF_JPY] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:27 | INFO     | tradr | [XAU_USD] Scanning (OANDA: XAU_USD, FTMO: XAUUSD)...
+2025-12-10 16:01:27 | INFO     | tradr | [XAU_USD] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:27 | INFO     | tradr | [XAG_USD] Scanning (OANDA: XAG_USD, FTMO: XAGUSD)...
+2025-12-10 16:01:28 | INFO     | tradr | [XAG_USD] BULLISH | Conf: 4/7 | Quality: 2 | Status: active
+2025-12-10 16:01:28 | INFO     | tradr | [XAG_USD] Entry too far: 48.93500 is 2.97R from current 61.89700 (max: 2.0R)
+2025-12-10 16:01:28 | INFO     | tradr | [SPX500_USD] Scanning (OANDA: SPX500_USD, FTMO: US500.cash)...
+2025-12-10 16:01:28 | INFO     | tradr | [SPX500_USD] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:29 | INFO     | tradr | [NAS100_USD] Scanning (OANDA: NAS100_USD, FTMO: US100.cash)...
+2025-12-10 16:01:29 | INFO     | tradr | [NAS100_USD] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:29 | INFO     | tradr | [BTC_USD] Scanning (OANDA: BTC_USD, FTMO: BTCUSD)...
+2025-12-10 16:01:29 | INFO     | tradr | [BTC_USD] BULLISH | Conf: 4/7 | Quality: 3 | Status: active
+2025-12-10 16:01:29 | INFO     | tradr | [BTC_USD] Entry proximity OK: 0.09R from current price
+2025-12-10 16:01:29 | INFO     | tradr | [BTC_USD] ✓ ACTIVE SIGNAL VALIDATED!
+2025-12-10 16:01:29 | INFO     | tradr |   Direction: BULLISH
+2025-12-10 16:01:29 | INFO     | tradr |   Confluence: 4/7
+2025-12-10 16:01:29 | INFO     | tradr |   Current Price: 91965.95000
+2025-12-10 16:01:29 | INFO     | tradr |   Entry: 90865.55586 (0.09R away)
+2025-12-10 16:01:29 | INFO     | tradr |   SL: 78803.78406 (1206177179.7 pips)
+2025-12-10 16:01:29 | INFO     | tradr |   TP1: 108958.21356 (1.5R)
+2025-12-10 16:01:29 | INFO     | tradr |   TP2: 127050.87125 (3.0R)
+2025-12-10 16:01:29 | INFO     | tradr |   TP3: 151174.41485 (5.0R)
+2025-12-10 16:01:29 | INFO     | tradr |   TP4: 175297.95844 (7.0R)
+2025-12-10 16:01:30 | INFO     | tradr |   TP5: 211483.27383 (10.0R)
+2025-12-10 16:01:30 | INFO     | tradr | [BTC_USD] Max trades reached: 2/2
+2025-12-10 16:01:30 | INFO     | tradr | [ETH_USD] Scanning (OANDA: ETH_USD, FTMO: ETHUSD)...
+2025-12-10 16:01:30 | INFO     | tradr | [ETH_USD] BULLISH | Conf: 3/7 | Quality: 2 | Status: scan_only
+2025-12-10 16:01:31 | INFO     | tradr | ======================================================================
+2025-12-10 16:01:31 | INFO     | tradr | SCAN COMPLETE
+2025-12-10 16:01:31 | INFO     | tradr |   Symbols scanned: 34/34
+2025-12-10 16:01:31 | INFO     | tradr |   Active signals: 12
+2025-12-10 16:01:31 | INFO     | tradr |   Pending orders placed: 2
+2025-12-10 16:01:31 | INFO     | tradr |   Open positions: 2
+2025-12-10 16:01:31 | INFO     | tradr |   Pending orders: 0
+2025-12-10 16:01:31 | INFO     | tradr |   Tracked setups: 2
+2025-12-10 16:01:31 | INFO     | tradr |   Challenge Phase: 1
+2025-12-10 16:01:31 | INFO     | tradr |   Balance: $9,737.87
+2025-12-10 16:01:31 | INFO     | tradr |   Profit: -2.62% (Target: 10.0%)
+2025-12-10 16:01:31 | INFO     | tradr |   Daily DD: 0.00%/5%
+2025-12-10 16:01:31 | INFO     | tradr |   Max DD: 2.62%/10%
+2025-12-10 16:01:31 | INFO     | tradr |   Profitable Days: 5/0
+2025-12-10 16:01:31 | INFO     | tradr | ======================================================================
+
+
+
+

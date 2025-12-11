@@ -762,7 +762,7 @@ class LiveTradingBot:
             log.info(f"  Entry Level: {entry:.5f}")
             log.info(f"  SL: {sl:.5f}")
             log.info(f"  TP1: {tp1:.5f}")
-            log.info(f"  TP5: {tp5:.5f if tp5 else 'N/A'}")
+            log.info(f"  TP5: {tp5:.5f}" if tp5 else "  TP5: N/A")
             log.info(f"  Lot Size: {lot_size}")
             log.info(f"  Expiration: {FTMO_CONFIG.pending_order_expiry_hours} hours")
             
