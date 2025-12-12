@@ -48,6 +48,34 @@ BACKUP_DIR.mkdir(exist_ok=True)
 MODIFICATION_LOG_FILE = OUTPUT_DIR / "modification_log.json"
 
 
+def is_valid_trading_day(dt: datetime) -> bool:
+    """Check if datetime is a valid trading day (no weekends or major holidays)."""
+    if dt.weekday() >= 5:  # Weekend check
+        return False
+    if dt.month == 1 and dt.day == 1:  # New Year's Day
+        return False
+    if dt.month == 12 and dt.day == 25:  # Christmas
+        return False
+    return True
+
+
+def validate_price_against_candle(entry_price: float, exit_price: float, candle_high: float, candle_low: float) -> Tuple[bool, str]:
+    """Validate that entry/exit prices are within the candle's high/low range."""
+    notes = []
+    is_valid = True
+    
+    if entry_price > candle_high or entry_price < candle_low:
+        is_valid = False
+        notes.append(f"Entry {entry_price} outside candle range [{candle_low}-{candle_high}]")
+    
+    if exit_price > candle_high or exit_price < candle_low:
+        if exit_price != 0:
+            is_valid = False
+            notes.append(f"Exit {exit_price} outside candle range [{candle_low}-{candle_high}]")
+    
+    return is_valid, "; ".join(notes) if notes else "Price validated"
+
+
 @dataclass
 class BacktestTrade:
     """Extended trade data for FTMO challenge analysis."""
@@ -780,6 +808,9 @@ class ChallengeSequencer:
                     trade_date = datetime.fromisoformat(trade_date.replace("Z", "+00:00"))
                 except:
                     trade_date = datetime.now()
+            
+            if not is_valid_trading_day(trade_date):
+                continue
             
             trade_day = trade_date.date() if hasattr(trade_date, 'date') else trade_date
             
@@ -1712,10 +1743,23 @@ def run_full_period_backtest(
         print(f"Processing {asset}...", end=" ")
         
         try:
-            daily_data = get_ohlcv_api(asset, timeframe="D", count=500, use_cache=True)
-            weekly_data = get_ohlcv_api(asset, timeframe="W", count=104, use_cache=True) or []
+            daily_data = get_ohlcv_api(asset, timeframe="D", count=1000, use_cache=True)
+            weekly_data = get_ohlcv_api(asset, timeframe="W", count=200, use_cache=True) or []
             monthly_data = get_ohlcv_api(asset, timeframe="M", count=60, use_cache=True) or []
-            h4_data = get_ohlcv_api(asset, timeframe="H4", count=500, use_cache=True) or []
+            h4_data = get_ohlcv_api(asset, timeframe="H4", count=1000, use_cache=True) or []
+            
+            dukascopy_data = None
+            try:
+                downloader = DukascopyDownloader()
+                dukascopy_data = downloader.get_ohlcv(
+                    symbol=asset,
+                    start_date=start_date.date() if hasattr(start_date, 'date') else start_date,
+                    end_date=end_date.date() if hasattr(end_date, 'date') else end_date,
+                    timeframe="D",
+                    use_cache=True,
+                )
+            except Exception as e:
+                pass
             
             if not daily_data:
                 print("No data")
@@ -1740,7 +1784,8 @@ def run_full_period_backtest(
                     end_naive = end_date.replace(tzinfo=None) if end_date.tzinfo else end_date
                     
                     if start_naive <= candle_dt <= end_naive:
-                        filtered_daily.append(candle)
+                        if is_valid_trading_day(candle_dt):
+                            filtered_daily.append(candle)
             
             if not filtered_daily:
                 print("No data in period")
@@ -1755,8 +1800,41 @@ def run_full_period_backtest(
                 h4_candles=h4_data,
             )
             
-            all_trades.extend(trades)
-            print(f"{len(trades)} trades")
+            validated_trades = []
+            for trade in trades:
+                trade_dt = trade.entry_date
+                if isinstance(trade_dt, str):
+                    try:
+                        trade_dt = datetime.fromisoformat(trade_dt.replace("Z", "+00:00"))
+                    except:
+                        validated_trades.append(trade)
+                        continue
+                
+                if not is_valid_trading_day(trade_dt):
+                    continue
+                
+                if dukascopy_data:
+                    trade_date_only = trade_dt.date() if hasattr(trade_dt, 'date') else trade_dt
+                    for duk_candle in dukascopy_data:
+                        duk_time = duk_candle.get("time")
+                        if isinstance(duk_time, datetime):
+                            duk_date = duk_time.date()
+                        else:
+                            duk_date = duk_time
+                        
+                        if duk_date == trade_date_only:
+                            is_valid, notes = validate_price_against_candle(
+                                trade.entry_price,
+                                trade.exit_price,
+                                duk_candle.get("high", float('inf')),
+                                duk_candle.get("low", 0),
+                            )
+                            break
+                
+                validated_trades.append(trade)
+            
+            all_trades.extend(validated_trades)
+            print(f"{len(validated_trades)} trades ({len(trades) - len(validated_trades)} filtered)")
             
         except Exception as e:
             print(f"Error: {e}")
