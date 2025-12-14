@@ -8,7 +8,7 @@ from typing import List, Tuple
 
 
 @dataclass
-class FTMO10KConfig:
+class FTMO200KConfig:
     """FTMO 200K Challenge Configuration - Ultra-Conservative Approach"""
 
     # === ACCOUNT SETTINGS ===
@@ -336,7 +336,10 @@ class FTMO10KConfig:
 
 
 # Global configuration instance
-FTMO_CONFIG = FTMO10KConfig()
+FTMO_CONFIG = FTMO200KConfig()
+
+# Backwards compatibility alias
+FTMO10KConfig = FTMO200KConfig
 
 
 # Pip sizes for different asset classes
