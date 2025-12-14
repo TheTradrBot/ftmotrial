@@ -2589,7 +2589,94 @@ def main_challenge_analyzer():
         excluded_assets=optimizer.get_excluded_assets(),
     )
     
-    final_results = optimizer.best_validation_result.get("results", training_results) if optimizer.best_validation_result else training_results
+    print(f"\n{'='*80}")
+    print("FULL YEAR BACKTEST WITH OPTIMIZED PARAMETERS")
+    print(f"{'='*80}")
+    
+    full_year_start = datetime(2024, 1, 1)
+    full_year_end = datetime(2024, 12, 31)
+    
+    full_year_trades = run_full_period_backtest(
+        start_date=full_year_start,
+        end_date=full_year_end,
+        min_confluence=best_params['min_confluence'],
+        min_quality_factors=best_params['min_quality_factors'],
+        risk_per_trade_pct=best_params['risk_per_trade_pct'],
+        excluded_assets=optimizer.get_excluded_assets(),
+    )
+    
+    full_year_backtest_trades = []
+    trade_num = 0
+    for trade in full_year_trades:
+        trade_num += 1
+        r_multiple = trade.rr if trade.is_winner else -1.0
+        result = "WIN" if trade.is_winner else "LOSS"
+        profit_usd = r_multiple * 200000 * 0.01 * 0.95 / 100
+        
+        entry_dt = trade.entry_date
+        if isinstance(entry_dt, str):
+            try:
+                entry_dt = datetime.fromisoformat(entry_dt.replace("Z", "+00:00"))
+            except:
+                entry_dt = datetime.now()
+        if hasattr(entry_dt, 'replace') and entry_dt.tzinfo:
+            entry_dt = entry_dt.replace(tzinfo=None)
+        
+        exit_dt = trade.exit_date
+        if isinstance(exit_dt, str):
+            try:
+                exit_dt = datetime.fromisoformat(exit_dt.replace("Z", "+00:00"))
+            except:
+                exit_dt = datetime.now()
+        if hasattr(exit_dt, 'replace') and exit_dt.tzinfo:
+            exit_dt = exit_dt.replace(tzinfo=None)
+        
+        bt = BacktestTrade(
+            trade_num=trade_num,
+            challenge_num=1,
+            challenge_step=1,
+            symbol=trade.symbol,
+            direction=trade.direction,
+            confluence_score=getattr(trade, 'confluence_score', 0),
+            entry_date=entry_dt,
+            entry_price=trade.entry_price,
+            stop_loss=trade.stop_loss,
+            tp1_price=trade.tp1 or trade.entry_price,
+            tp2_price=trade.tp2,
+            tp3_price=trade.tp3,
+            tp4_price=trade.tp4,
+            tp5_price=trade.tp5,
+            exit_date=exit_dt,
+            exit_price=trade.exit_price,
+            exit_reason=trade.exit_reason,
+            r_multiple=r_multiple,
+            profit_loss_usd=profit_usd,
+            result=result,
+        )
+        full_year_backtest_trades.append(bt)
+    
+    wins = sum(1 for t in full_year_backtest_trades if t.result == "WIN")
+    total = len(full_year_backtest_trades)
+    total_r = sum(t.r_multiple for t in full_year_backtest_trades)
+    win_rate = (wins / total * 100) if total > 0 else 0
+    
+    print(f"\n{'='*80}")
+    print("FULL YEAR 2024 BACKTEST RESULTS")
+    print(f"{'='*80}")
+    print(f"Total Trades: {total}")
+    print(f"Wins: {wins}")
+    print(f"Win Rate: {win_rate:.1f}%")
+    print(f"Total R: {total_r:+.1f}R")
+    
+    final_results = {
+        "all_trades": full_year_backtest_trades,
+        "total_trades": total,
+        "wins": wins,
+        "win_rate": win_rate,
+        "total_r": total_r,
+        "challenges_passed": optimizer.best_training_result.get("results", {}).get("challenges_passed", 0) if optimizer.best_training_result else 0,
+        "challenges_failed": optimizer.best_training_result.get("results", {}).get("challenges_failed", 0) if optimizer.best_training_result else 0,
+    }
     
     print(f"\n{'='*80}")
     print("GENERATING FINAL REPORTS")
@@ -2598,6 +2685,7 @@ def main_challenge_analyzer():
     reporter = ReportGenerator()
     
     validator = OandaValidator()
+    validation_report = {}
     if final_results.get('all_trades'):
         validation_report = validator.validate_all_trades(final_results.get('all_trades', []))
     

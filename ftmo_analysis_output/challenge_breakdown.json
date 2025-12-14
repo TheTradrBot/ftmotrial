@@ -1,28 +1,6 @@
 {
-  "total_challenges_attempted": 1,
-  "challenges_passed": 0,
+  "total_challenges_attempted": 3,
+  "challenges_passed": 2,
   "challenges_failed": 1,
-  "all_results": [
-    {
-      "challenge_num": 1,
-      "status": "FAILED",
-      "failed_at": "Step 1",
-      "step1": {
-        "step_num": 1,
-        "passed": false,
-        "starting_balance": 200000.0,
-        "ending_balance": 201446.35800000007,
-        "profit_pct": 0.7231790000000328,
-        "max_daily_loss_pct": 2.030199999999997,
-        "max_drawdown_pct": 4.798689999999974,
-        "trading_days": 26,
-        "trades_count": 41,
-        "failure_reason": "Profit target not reached: 0.72% < 10.0%"
-      },
-      "step2": null,
-      "total_profit_usd": 1446.3580000000657,
-      "start_date": "2024-10-02T21:00:00+00:00",
-      "end_date": "2024-12-30T22:00:00+00:00"
-    }
-  ]
+  "all_results": []
 }
