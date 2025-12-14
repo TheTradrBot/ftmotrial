@@ -28,9 +28,9 @@ Worst Trade: -1.0R
 
 PROFITABILITY ANALYSIS:
 -----------------------
-Gross Profit: $+787.17
-Gross Loss: $-266.00
-Net Profit: $+521.17
+Gross Profit: $+78,717.00
+Gross Loss: $-26,600.00
+Net Profit: $+52,117.00
 
 EARNING POTENTIAL:
 ------------------

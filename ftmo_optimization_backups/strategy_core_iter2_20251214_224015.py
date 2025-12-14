@@ -41,8 +41,8 @@ class StrategyParams:
     
     These control confluence thresholds, SL/TP ratios, filters, etc.
     """
-    min_confluence: int = 2
-    min_quality_factors: int = 1
+    min_confluence: int = 3
+    min_quality_factors: int = 2
     
     atr_sl_multiplier: float = 1.5
     atr_tp1_multiplier: float = 0.6
@@ -1154,8 +1154,7 @@ def simulate_trades(
     This is a walk-forward simulation with no look-ahead bias.
     Uses the same logic as live trading but runs through historical data.
     
-    IMPORTANT: Supports multiple concurrent trades up to params.max_open_trades.
-    Entry prices are validated against actual candle data.
+    IMPORTANT: Entry prices are now validated against actual candle data.
     If the theoretical entry price is not available on the signal bar,
     we wait up to 5 bars for price to reach the entry level.
     
@@ -1180,178 +1179,201 @@ def simulate_trades(
     
     active_signals = [s for s in signals if s.is_active]
     
-    TP1_CLOSE_PCT = params.tp1_close_pct
-    TP2_CLOSE_PCT = params.tp2_close_pct
-    TP3_CLOSE_PCT = params.tp3_close_pct
-    TP4_CLOSE_PCT = params.tp4_close_pct
-    TP5_CLOSE_PCT = params.tp5_close_pct
+    trades = []
+    open_trade = None
+    last_trade_bar = -params.cooldown_bars - 1
     
-    signal_to_pending_entry = {}
-    for sig in active_signals:
-        if sig.entry is None or sig.stop_loss is None or sig.tp1 is None:
+    for signal in active_signals:
+        if signal.bar_index <= last_trade_bar + params.cooldown_bars:
             continue
-        risk = abs(sig.entry - sig.stop_loss)
+        
+        if signal.entry is None or signal.stop_loss is None or signal.tp1 is None:
+            continue
+        
+        if open_trade is not None:
+            continue
+        
+        theoretical_entry = signal.entry
+        direction = signal.direction
+        
+        actual_entry_bar, actual_entry_price, _ = _validate_and_find_entry(
+            candles, signal.bar_index, theoretical_entry, direction, max_wait_bars=5
+        )
+        
+        if actual_entry_bar is None:
+            continue
+        
+        entry_bar = actual_entry_bar
+        entry_price = actual_entry_price
+        sl = signal.stop_loss
+        tp1 = signal.tp1
+        tp2 = signal.tp2
+        tp3 = signal.tp3
+        tp4 = signal.tp4
+        tp5 = signal.tp5
+        
+        risk = abs(entry_price - sl)
         if risk <= 0:
             continue
-        signal_to_pending_entry[id(sig)] = {
-            "signal": sig,
-            "wait_until_bar": sig.bar_index + 5,
-        }
-    
-    trades = []
-    open_trades = []
-    entered_signal_ids = set()
-    
-    for bar_idx in range(len(candles)):
-        c = candles[bar_idx]
-        high = c["high"]
-        low = c["low"]
-        bar_timestamp = c.get("time") or c.get("timestamp") or c.get("date")
         
-        trades_to_close = []
-        for ot in open_trades:
-            direction = ot["direction"]
-            entry_price = ot["entry_price"]
-            risk = ot["risk"]
-            trailing_sl = ot["trailing_sl"]
-            tp1 = ot["tp1"]
-            tp2 = ot["tp2"]
-            tp3 = ot["tp3"]
-            tp4 = ot["tp4"]
-            tp5 = ot["tp5"]
-            tp1_hit = ot["tp1_hit"]
-            tp2_hit = ot["tp2_hit"]
-            tp3_hit = ot["tp3_hit"]
-            tp4_hit = ot["tp4_hit"]
-            tp5_hit = ot["tp5_hit"]
-            
-            tp1_rr = ot["tp1_rr"]
-            tp2_rr = ot["tp2_rr"]
-            tp3_rr = ot["tp3_rr"]
-            tp4_rr = ot["tp4_rr"]
-            tp5_rr = ot["tp5_rr"]
-            
-            trade_closed = False
-            rr = 0.0
-            is_winner = False
-            exit_reason = ""
-            reward = 0.0
+        # Partial take-profit percentages from params (must sum to 1.0)
+        TP1_CLOSE_PCT = params.tp1_close_pct  # 10%
+        TP2_CLOSE_PCT = params.tp2_close_pct  # 10%
+        TP3_CLOSE_PCT = params.tp3_close_pct  # 15%
+        TP4_CLOSE_PCT = params.tp4_close_pct  # 20%
+        TP5_CLOSE_PCT = params.tp5_close_pct  # 45%
+        
+        # Pre-calculate individual R-multiples for each TP level
+        tp1_rr = (tp1 - entry_price) / risk if tp1 and direction == "bullish" else ((entry_price - tp1) / risk if tp1 else 0)
+        tp2_rr = (tp2 - entry_price) / risk if tp2 and direction == "bullish" else ((entry_price - tp2) / risk if tp2 else 0)
+        tp3_rr = (tp3 - entry_price) / risk if tp3 and direction == "bullish" else ((entry_price - tp3) / risk if tp3 else 0)
+        tp4_rr = (tp4 - entry_price) / risk if tp4 and direction == "bullish" else ((entry_price - tp4) / risk if tp4 else 0)
+        tp5_rr = (tp5 - entry_price) / risk if tp5 and direction == "bullish" else ((entry_price - tp5) / risk if tp5 else 0)
+        
+        trade_closed = False
+        tp1_hit = False
+        tp2_hit = False
+        tp3_hit = False
+        tp4_hit = False
+        tp5_hit = False
+        trailing_sl = sl
+        
+        reward = 0.0
+        rr = 0.0
+        is_winner = False
+        exit_reason = ""
+        
+        for exit_bar in range(entry_bar + 1, len(candles)):
+            c = candles[exit_bar]
+            high = c["high"]
+            low = c["low"]
+            exit_timestamp = c.get("time") or c.get("timestamp") or c.get("date")
             
             if direction == "bullish":
+                # Check stop loss first
                 if low <= trailing_sl:
                     trail_rr = (trailing_sl - entry_price) / risk
                     if tp4_hit:
+                        # TP4 hit, then trail stopped
                         remaining_pct = TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + TP3_CLOSE_PCT * tp3_rr + TP4_CLOSE_PCT * tp4_rr + remaining_pct * trail_rr
                         exit_reason = "TP4+Trail"
                         is_winner = True
                     elif tp3_hit:
+                        # TP3 hit, then trail stopped
                         remaining_pct = TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + TP3_CLOSE_PCT * tp3_rr + remaining_pct * trail_rr
                         exit_reason = "TP3+Trail"
                         is_winner = True
                     elif tp2_hit:
+                        # TP2 hit, then trail stopped
                         remaining_pct = TP3_CLOSE_PCT + TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + remaining_pct * trail_rr
                         exit_reason = "TP2+Trail"
                         is_winner = rr >= 0
                     elif tp1_hit:
+                        # TP1 hit, then trail stopped
                         remaining_pct = TP2_CLOSE_PCT + TP3_CLOSE_PCT + TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + remaining_pct * trail_rr
                         exit_reason = "TP1+Trail"
                         is_winner = rr >= 0
                     else:
+                        # Full stop loss
                         rr = -1.0
                         exit_reason = "SL"
                         is_winner = False
                     reward = rr * risk
                     trade_closed = True
                 
+                # Check TP hits sequentially and update trailing stops
                 if not trade_closed and tp1 is not None and high >= tp1 and not tp1_hit:
-                    ot["tp1_hit"] = True
                     tp1_hit = True
-                    ot["trailing_sl"] = entry_price
+                    trailing_sl = entry_price  # Move to breakeven
                 
                 if not trade_closed and tp1_hit and tp2 is not None and high >= tp2 and not tp2_hit:
-                    ot["tp2_hit"] = True
                     tp2_hit = True
                     if tp1 is not None:
-                        ot["trailing_sl"] = tp1 + 0.5 * risk
+                        trailing_sl = tp1 + 0.5 * risk  # Move to TP1 + 0.5R buffer
                 
                 if not trade_closed and tp2_hit and tp3 is not None and high >= tp3 and not tp3_hit:
-                    ot["tp3_hit"] = True
                     tp3_hit = True
                     if tp2 is not None:
-                        ot["trailing_sl"] = tp2 + 0.5 * risk
+                        trailing_sl = tp2 + 0.5 * risk  # Move to TP2 + 0.5R buffer
                 
                 if not trade_closed and tp3_hit and tp4 is not None and high >= tp4 and not tp4_hit:
-                    ot["tp4_hit"] = True
                     tp4_hit = True
                     if tp3 is not None:
-                        ot["trailing_sl"] = tp3 + 0.5 * risk
+                        trailing_sl = tp3 + 0.5 * risk  # Move to TP3 + 0.5R buffer
                 
                 if not trade_closed and tp4_hit and tp5 is not None and high >= tp5 and not tp5_hit:
-                    ot["tp5_hit"] = True
+                    tp5_hit = True
+                    # TP5 hit - close entire position
                     rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + TP3_CLOSE_PCT * tp3_rr + TP4_CLOSE_PCT * tp4_rr + TP5_CLOSE_PCT * tp5_rr
                     reward = rr * risk
                     exit_reason = "TP5"
                     is_winner = True
                     trade_closed = True
+                
             else:
+                # BEARISH direction
+                # Check stop loss first
                 if high >= trailing_sl:
                     trail_rr = (entry_price - trailing_sl) / risk
                     if tp4_hit:
+                        # TP4 hit, then trail stopped
                         remaining_pct = TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + TP3_CLOSE_PCT * tp3_rr + TP4_CLOSE_PCT * tp4_rr + remaining_pct * trail_rr
                         exit_reason = "TP4+Trail"
                         is_winner = True
                     elif tp3_hit:
+                        # TP3 hit, then trail stopped
                         remaining_pct = TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + TP3_CLOSE_PCT * tp3_rr + remaining_pct * trail_rr
                         exit_reason = "TP3+Trail"
                         is_winner = True
                     elif tp2_hit:
+                        # TP2 hit, then trail stopped
                         remaining_pct = TP3_CLOSE_PCT + TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + remaining_pct * trail_rr
                         exit_reason = "TP2+Trail"
                         is_winner = rr >= 0
                     elif tp1_hit:
+                        # TP1 hit, then trail stopped
                         remaining_pct = TP2_CLOSE_PCT + TP3_CLOSE_PCT + TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + remaining_pct * trail_rr
                         exit_reason = "TP1+Trail"
                         is_winner = rr >= 0
                     else:
+                        # Full stop loss
                         rr = -1.0
                         exit_reason = "SL"
                         is_winner = False
                     reward = rr * risk
                     trade_closed = True
                 
+                # Check TP hits sequentially and update trailing stops
                 if not trade_closed and tp1 is not None and low <= tp1 and not tp1_hit:
-                    ot["tp1_hit"] = True
                     tp1_hit = True
-                    ot["trailing_sl"] = entry_price
+                    trailing_sl = entry_price  # Move to breakeven
                 
                 if not trade_closed and tp1_hit and tp2 is not None and low <= tp2 and not tp2_hit:
-                    ot["tp2_hit"] = True
                     tp2_hit = True
                     if tp1 is not None:
-                        ot["trailing_sl"] = tp1 - 0.5 * risk
+                        trailing_sl = tp1 - 0.5 * risk  # Move to TP1 - 0.5R buffer (bearish)
                 
                 if not trade_closed and tp2_hit and tp3 is not None and low <= tp3 and not tp3_hit:
-                    ot["tp3_hit"] = True
                     tp3_hit = True
                     if tp2 is not None:
-                        ot["trailing_sl"] = tp2 - 0.5 * risk
+                        trailing_sl = tp2 - 0.5 * risk  # Move to TP2 - 0.5R buffer (bearish)
                 
                 if not trade_closed and tp3_hit and tp4 is not None and low <= tp4 and not tp4_hit:
-                    ot["tp4_hit"] = True
                     tp4_hit = True
                     if tp3 is not None:
-                        ot["trailing_sl"] = tp3 - 0.5 * risk
+                        trailing_sl = tp3 - 0.5 * risk  # Move to TP3 - 0.5R buffer (bearish)
                 
                 if not trade_closed and tp4_hit and tp5 is not None and low <= tp5 and not tp5_hit:
-                    ot["tp5_hit"] = True
+                    tp5_hit = True
+                    # TP5 hit - close entire position
                     rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + TP3_CLOSE_PCT * tp3_rr + TP4_CLOSE_PCT * tp4_rr + TP5_CLOSE_PCT * tp5_rr
                     reward = rr * risk
                     exit_reason = "TP5"
@@ -1359,14 +1381,17 @@ def simulate_trades(
                     trade_closed = True
             
             if trade_closed:
+                entry_candle = candles[entry_bar]
+                entry_timestamp = entry_candle.get("time") or entry_candle.get("timestamp") or entry_candle.get("date")
+                
                 trade = Trade(
                     symbol=symbol,
                     direction=direction,
-                    entry_date=ot["entry_timestamp"],
-                    exit_date=bar_timestamp,
+                    entry_date=entry_timestamp,
+                    exit_date=exit_timestamp,
                     entry_price=entry_price,
                     exit_price=entry_price + reward if direction == "bullish" else entry_price - reward,
-                    stop_loss=ot["sl"],
+                    stop_loss=sl,
                     tp1=tp1,
                     tp2=tp2,
                     tp3=tp3,
@@ -1377,87 +1402,14 @@ def simulate_trades(
                     rr=rr,
                     is_winner=is_winner,
                     exit_reason=exit_reason,
-                    confluence_score=ot["confluence_score"],
+                    confluence_score=signal.confluence_score,
                 )
                 trades.append(trade)
-                trades_to_close.append(ot)
+                last_trade_bar = exit_bar
+                break
         
-        for ot in trades_to_close:
-            open_trades.remove(ot)
-        
-        if len(open_trades) < params.max_open_trades:
-            for sig_id, pending in list(signal_to_pending_entry.items()):
-                if sig_id in entered_signal_ids:
-                    continue
-                if len(open_trades) >= params.max_open_trades:
-                    break
-                
-                sig = pending["signal"]
-                if bar_idx < sig.bar_index:
-                    continue
-                if bar_idx > pending["wait_until_bar"]:
-                    entered_signal_ids.add(sig_id)
-                    continue
-                
-                theoretical_entry = sig.entry
-                direction = sig.direction
-                
-                if direction == "bullish":
-                    if low <= theoretical_entry <= high:
-                        entry_price = theoretical_entry
-                    else:
-                        continue
-                else:
-                    if low <= theoretical_entry <= high:
-                        entry_price = theoretical_entry
-                    else:
-                        continue
-                
-                sl = sig.stop_loss
-                tp1 = sig.tp1
-                tp2 = sig.tp2
-                tp3 = sig.tp3
-                tp4 = sig.tp4
-                tp5 = sig.tp5
-                risk = abs(entry_price - sl)
-                
-                if risk <= 0:
-                    entered_signal_ids.add(sig_id)
-                    continue
-                
-                tp1_rr = (tp1 - entry_price) / risk if tp1 and direction == "bullish" else ((entry_price - tp1) / risk if tp1 else 0)
-                tp2_rr = (tp2 - entry_price) / risk if tp2 and direction == "bullish" else ((entry_price - tp2) / risk if tp2 else 0)
-                tp3_rr = (tp3 - entry_price) / risk if tp3 and direction == "bullish" else ((entry_price - tp3) / risk if tp3 else 0)
-                tp4_rr = (tp4 - entry_price) / risk if tp4 and direction == "bullish" else ((entry_price - tp4) / risk if tp4 else 0)
-                tp5_rr = (tp5 - entry_price) / risk if tp5 and direction == "bullish" else ((entry_price - tp5) / risk if tp5 else 0)
-                
-                open_trades.append({
-                    "signal_id": sig_id,
-                    "direction": direction,
-                    "entry_bar": bar_idx,
-                    "entry_price": entry_price,
-                    "entry_timestamp": bar_timestamp,
-                    "sl": sl,
-                    "trailing_sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "tp3": tp3,
-                    "tp4": tp4,
-                    "tp5": tp5,
-                    "risk": risk,
-                    "tp1_hit": False,
-                    "tp2_hit": False,
-                    "tp3_hit": False,
-                    "tp4_hit": False,
-                    "tp5_hit": False,
-                    "tp1_rr": tp1_rr,
-                    "tp2_rr": tp2_rr,
-                    "tp3_rr": tp3_rr,
-                    "tp4_rr": tp4_rr,
-                    "tp5_rr": tp5_rr,
-                    "confluence_score": sig.confluence_score,
-                })
-                entered_signal_ids.add(sig_id)
+        if not trade_closed:
+            pass
     
     return trades
 
