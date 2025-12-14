@@ -56,7 +56,7 @@ class FTMO200KConfig:
 
     # === CONFLUENCE SETTINGS ===
     min_confluence_score: int = 5  # Optimized: 3/7 - matches winning config from optimizer
-    min_quality_factors: int = 2  # Minimum 1 quality factor
+    min_quality_factors: int = 3  # Minimum 1 quality factor
 
     # === TAKE PROFIT SETTINGS ===
     tp1_r_multiple: float = 1.5  # TP1 at 1.5R

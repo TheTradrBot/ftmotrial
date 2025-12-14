@@ -19,7 +19,7 @@ deploymentTarget = "cloudrun"
 expertMode = true
 
 [workflows]
-runButton = "Project"
+runButton = "Live Trading Bot"
 
 [[workflows.workflow]]
 name = "Live Trading Bot"
