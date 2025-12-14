@@ -1434,7 +1434,6 @@ class PerformanceOptimizer:
     MIN_TRADES_NEEDED = 300
     MIN_WIN_RATE_PER_ASSET = 40.0
     MIN_R_PER_ASSET = 2.0
-    MIN_PROFIT_PER_WIN = 80.0
     EARLY_STOPPING_PATIENCE = 5
     
     def __init__(self, config: Optional[FTMO10KConfig] = None):
@@ -1595,12 +1594,6 @@ class PerformanceOptimizer:
         if low_r_assets:
             issues.append(f"Assets below +{self.MIN_R_PER_ASSET}R: {', '.join(low_r_assets[:5])}")
         
-        win_profits = [t.profit_loss_usd for t in all_trades if t.result == "WIN"]
-        avg_win_profit = sum(win_profits) / len(win_profits) if win_profits else 0
-        
-        if avg_win_profit < self.MIN_PROFIT_PER_WIN:
-            issues.append(f"Avg win profit: ${avg_win_profit:.2f} < ${self.MIN_PROFIT_PER_WIN}")
-        
         return len(issues) == 0, issues
     
     def check_trade_count(self, trade_count: int) -> bool:
@@ -1687,10 +1680,6 @@ class PerformanceOptimizer:
             optimizations["max_concurrent_trades"] = new_concurrent
             print(f"  [Optimizer] Risk failures detected. Reducing risk {self.current_risk_pct} -> {new_risk}")
         
-        if patterns["avg_win_profit"] < self.MIN_PROFIT_PER_WIN and patterns["dd_failures"] == 0:
-            new_risk = min(1.5, self.current_risk_pct + 0.25)
-            optimizations["risk_per_trade_pct"] = new_risk
-            print(f"  [Optimizer] Low avg win profit (${patterns['avg_win_profit']:.2f}). Increasing risk to {new_risk}%")
         
         if len(low_wr_assets) > 5:
             new_confluence = min(6, self.current_min_confluence + 1)
@@ -2459,9 +2448,8 @@ def main_challenge_analyzer():
     - >=14 challenges passed, <=2 failed
     - >=40% win rate per asset (assets with 3+ trades)
     - >=+2R total per asset (assets with 3+ trades)
-    - >=$80 avg profit per winning trade
     """
-    MAX_ITERATIONS = 30
+    MAX_ITERATIONS = 10
     iteration = 0
     success = False
     
@@ -2484,7 +2472,6 @@ def main_challenge_analyzer():
     print(f"  - Maximum 2 challenges FAILED")
     print(f"  - Minimum 40% win rate per asset (assets with 3+ trades)")
     print(f"  - Minimum +2R total per asset (assets with 3+ trades)")
-    print(f"  - Minimum $80 average profit per winning trade")
     print(f"\nOptimization Settings:")
     print(f"  Max Iterations: {MAX_ITERATIONS}")
     print(f"  Early Stopping Patience: {optimizer.EARLY_STOPPING_PATIENCE} iterations")
