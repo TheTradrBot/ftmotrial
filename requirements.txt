@@ -46,3 +46,4 @@ flask-cors
 flask
 flask-cors
 python-dotenv
+flask
