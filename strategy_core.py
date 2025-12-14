@@ -1203,10 +1203,6 @@ def simulate_trades(
         if actual_entry_bar is None:
             continue
         
-        # Skip if entry candle is on a weekend (safety check)
-        if _is_weekend(candles[actual_entry_bar]):
-            continue
-        
         entry_bar = actual_entry_bar
         entry_price = actual_entry_price
         sl = signal.stop_loss
