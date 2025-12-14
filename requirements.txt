@@ -39,3 +39,5 @@ flask
 numpy
 pandas
 requests
+flask
+flask-cors
