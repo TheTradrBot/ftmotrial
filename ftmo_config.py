@@ -162,8 +162,8 @@ class FTMO200KConfig:
     })
 
     # === WEEKEND HOLDING RESTRICTIONS ===
-    weekend_close_enabled: bool = True  # Close all before weekend
-    friday_close_hour_utc: int = 21  # Close positions at 21:00 UTC Friday
+    weekend_close_enabled: bool = False  # Disabled - Swing account allows weekend holding
+    friday_close_hour_utc: int = 21  # Close positions at 21:00 UTC Friday (unused when disabled)
     friday_close_minute_utc: int = 0
 
     def __post_init__(self):

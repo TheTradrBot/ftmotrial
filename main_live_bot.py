@@ -177,11 +177,115 @@ class LiveTradingBot:
         except Exception as e:
             log.error(f"Error saving pending setups: {e}")
     
+    def _load_trading_days(self):
+        """Load trading days from file for FTMO minimum trading days tracking."""
+        try:
+            if Path(self.TRADING_DAYS_FILE).exists():
+                with open(self.TRADING_DAYS_FILE, 'r') as f:
+                    data = json.load(f)
+                self.trading_days = set(data.get("trading_days", []))
+                start_date_str = data.get("challenge_start_date")
+                end_date_str = data.get("challenge_end_date")
+                if start_date_str:
+                    normalized = start_date_str.replace("Z", "+00:00")
+                    self.challenge_start_date = datetime.fromisoformat(normalized)
+                if end_date_str:
+                    normalized = end_date_str.replace("Z", "+00:00")
+                    self.challenge_end_date = datetime.fromisoformat(normalized)
+                log.info(f"Loaded {len(self.trading_days)} trading days from file")
+        except Exception as e:
+            log.error(f"Error loading trading days: {e}")
+            self.trading_days = set()
+    
+    def start_new_challenge(self, duration_days: int = 30):
+        """
+        Start a new challenge period with fresh trading days tracking.
+        Call this when starting Phase 1, Phase 2, or resetting the challenge.
+        """
+        self.trading_days = set()
+        self.challenge_start_date = datetime.now(timezone.utc)
+        self.challenge_end_date = self.challenge_start_date + timedelta(days=duration_days)
+        self._save_trading_days()
+        log.info(f"New challenge started: {self.challenge_start_date.date()} to {self.challenge_end_date.date()} ({duration_days} days)")
+    
+    def _save_trading_days(self):
+        """Save trading days to file."""
+        try:
+            data = {
+                "trading_days": list(self.trading_days),
+                "challenge_start_date": self.challenge_start_date.isoformat() if self.challenge_start_date else None,
+                "challenge_end_date": self.challenge_end_date.isoformat() if self.challenge_end_date else None,
+            }
+            with open(self.TRADING_DAYS_FILE, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            log.error(f"Error saving trading days: {e}")
+    
+    def record_trading_day(self):
+        """
+        Record today as a trading day when a trade is executed.
+        Called after successful order placement/fill.
+        """
+        from ftmo_config import FTMO_CONFIG
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today not in self.trading_days:
+            self.trading_days.add(today)
+            self._save_trading_days()
+            log.info(f"Recorded trading day: {today} (Total: {len(self.trading_days)}/{FTMO_CONFIG.min_trading_days} required)")
+    
+    def check_trading_days_warning(self) -> bool:
+        """
+        Check if we're at risk of not meeting minimum trading days requirement.
+        Returns True if warning should be shown (not enough days traded relative to time remaining).
+        """
+        from ftmo_config import FTMO_CONFIG
+        
+        if self.challenge_end_date is None:
+            return False
+        
+        now = datetime.now(timezone.utc)
+        days_remaining = (self.challenge_end_date - now).days
+        trading_days_count = len(self.trading_days)
+        days_needed = FTMO_CONFIG.min_trading_days - trading_days_count
+        
+        if days_needed <= 0:
+            return False
+        
+        if days_remaining <= days_needed + 2:
+            log.warning(f"TRADING DAYS WARNING: {trading_days_count}/{FTMO_CONFIG.min_trading_days} days traded, "
+                       f"{days_remaining} days remaining in challenge. Need {days_needed} more trading days!")
+            return True
+        
+        return False
+    
+    def get_trading_days_status(self) -> Dict:
+        """Get current trading days status for reporting."""
+        from ftmo_config import FTMO_CONFIG
+        
+        trading_days_count = len(self.trading_days)
+        days_needed = max(0, FTMO_CONFIG.min_trading_days - trading_days_count)
+        
+        status = {
+            "trading_days_count": trading_days_count,
+            "min_required": FTMO_CONFIG.min_trading_days,
+            "days_needed": days_needed,
+            "trading_days": sorted(list(self.trading_days)),
+            "requirement_met": trading_days_count >= FTMO_CONFIG.min_trading_days,
+        }
+        
+        if self.challenge_end_date:
+            now = datetime.now(timezone.utc)
+            status["days_remaining"] = max(0, (self.challenge_end_date - now).days)
+        
+        return status
+    
     def _auto_start_challenge(self):
         """Auto-start challenge if not already active."""
         if not self.risk_manager.state.live_flag:
             log.info("Challenge not active - auto-starting Phase 1...")
             self.risk_manager.start_challenge(phase=1)
+            if self.challenge_start_date is None:
+                self.start_new_challenge(duration_days=30)
             log.info("Challenge auto-started! Trading is now enabled.")
         else:
             phase = self.risk_manager.state.phase
@@ -898,6 +1002,9 @@ class LiveTradingBot:
         self.pending_setups[symbol] = pending_setup
         self._save_pending_setups()
         
+        if pending_setup.status == "filled":
+            self.record_trading_day()
+        
         return True
     
     def check_position_updates(self):
@@ -966,18 +1073,22 @@ class LiveTradingBot:
                 except (ValueError, TypeError) as e:
                     log.warning(f"[{symbol}] Could not parse created_at: {setup.created_at} - {e}")
             
-            if symbol in position_symbols:
-                log.info(f"[{symbol}] Pending order FILLED! Position now open")
+            broker_symbol = self.symbol_map.get(symbol, symbol)
+            if broker_symbol in position_symbols:
+                log.info(f"[{symbol}] Pending order FILLED! Position now open (broker: {broker_symbol})")
                 setup.status = "filled"
                 
                 self.risk_manager.record_trade_open(
-                    symbol=symbol,
+                    symbol=broker_symbol,
                     direction=setup.direction,
                     entry_price=setup.entry_price,
                     stop_loss=setup.stop_loss,
                     lot_size=setup.lot_size,
                     order_id=setup.order_ticket or 0,
                 )
+                
+                self._save_pending_setups()
+                self.record_trading_day()
                 continue
             
             if setup.order_ticket and setup.order_ticket not in pending_order_tickets:
@@ -986,7 +1097,7 @@ class LiveTradingBot:
                 setups_to_remove.append(symbol)
                 continue
             
-            tick = self.mt5.get_tick(symbol)
+            tick = self.mt5.get_tick(broker_symbol)
             if tick:
                 if setup.direction == "bullish" and tick.bid <= setup.stop_loss:
                     log.warning(f"[{symbol}] Price ({tick.bid:.5f}) breached SL ({setup.stop_loss:.5f}) - cancelling pending order")
