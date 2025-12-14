@@ -22,3 +22,8 @@ flask
 numpy
 pandas
 requests
+discord.py
+flask
+numpy
+pandas
+requests
