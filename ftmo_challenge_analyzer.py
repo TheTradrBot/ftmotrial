@@ -2002,7 +2002,7 @@ class ReportGenerator:
         self.output_dir = output_dir
         self.output_dir.mkdir(exist_ok=True)
     
-    def export_trade_log(self, trades: List[BacktestTrade], filename: str = "all_trades_jan_nov_2025.csv"):
+    def export_trade_log(self, trades: List[BacktestTrade], filename: str = "all_trades_jan_dec_2024.csv"):
         """Export comprehensive trade log to CSV."""
         filepath = self.output_dir / filename
         
@@ -2271,7 +2271,7 @@ def run_full_period_backtest(
     excluded_assets: Optional[List[str]] = None,
 ) -> List[Trade]:
     """
-    Run backtest for the full Jan-Nov 2025 period.
+    Run backtest for the full Jan-Dec 2024 period.
     Uses lower confluence threshold to generate more trades.
     """
     if assets is None:
@@ -2607,11 +2607,40 @@ def main_challenge_analyzer():
     
     full_year_backtest_trades = []
     trade_num = 0
+    account_size = 200000
+    risk_pct = best_params['risk_per_trade_pct']
+    
     for trade in full_year_trades:
         trade_num += 1
         r_multiple = trade.rr if trade.is_winner else -1.0
         result = "WIN" if trade.is_winner else "LOSS"
-        profit_usd = r_multiple * 200000 * 0.01 * 0.95 / 100
+        
+        # Calculate risk in USD
+        risk_per_trade_usd = account_size * (risk_pct / 100)
+        profit_usd = r_multiple * risk_per_trade_usd
+        
+        # Calculate lot size based on stop loss distance
+        pip_size = get_pip_size(trade.symbol)
+        if trade.entry_price and trade.stop_loss and pip_size > 0:
+            sl_distance = abs(trade.entry_price - trade.stop_loss)
+            risk_pips = sl_distance / pip_size
+            # Standard lot pip value calculation (approximate)
+            if "JPY" in trade.symbol:
+                pip_value_per_lot = 1000  # Approximate for JPY pairs
+            elif trade.symbol in METALS:
+                pip_value_per_lot = 10  # For gold/silver
+            elif trade.symbol in INDICES:
+                pip_value_per_lot = 1  # For indices
+            else:
+                pip_value_per_lot = 10  # Standard forex pairs
+            
+            if risk_pips > 0:
+                lot_size = risk_per_trade_usd / (risk_pips * pip_value_per_lot)
+            else:
+                lot_size = 0.01
+        else:
+            lot_size = 0.01
+            risk_pips = 0
         
         entry_dt = trade.entry_date
         if isinstance(entry_dt, str):
@@ -2652,6 +2681,8 @@ def main_challenge_analyzer():
             r_multiple=r_multiple,
             profit_loss_usd=profit_usd,
             result=result,
+            lot_size=lot_size,
+            risk_pips=risk_pips,
         )
         full_year_backtest_trades.append(bt)
     
