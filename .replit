@@ -39,6 +39,10 @@ author = "agent"
 task = "workflow.run"
 args = "Web Server"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "FTMO Analyzer"
+
 [[workflows.workflow]]
 name = "Web Server"
 author = "agent"
@@ -50,6 +54,17 @@ waitForPort = 5000
 
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow]]
+name = "FTMO Analyzer"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python ftmo_challenge_analyzer.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [[ports]]
 localPort = 5000
