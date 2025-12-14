@@ -168,5 +168,63 @@
       "MIN_CONFLUENCE -> 2"
     ],
     "timestamp": "2025-12-14T19:38:28.877947"
+  },
+  {
+    "iteration": 1,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter1_20251214_205049.py",
+    "changes": [
+      "min_confluence_score -> 3",
+      "min_quality_factors -> 2"
+    ],
+    "timestamp": "2025-12-14T20:50:49.813853"
+  },
+  {
+    "iteration": 1,
+    "file": "strategy_core.py",
+    "backup": "ftmo_optimization_backups/strategy_core_iter1_20251214_205049.py",
+    "changes": [
+      "min_confluence -> 3",
+      "min_quality_factors -> 2"
+    ],
+    "timestamp": "2025-12-14T20:50:49.817027"
+  },
+  {
+    "iteration": 1,
+    "file": "main_live_bot.py",
+    "backup": "ftmo_optimization_backups/main_live_bot_iter1_20251214_205049.py",
+    "changes": [
+      "MIN_CONFLUENCE -> 3"
+    ],
+    "timestamp": "2025-12-14T20:50:49.825163"
+  },
+  {
+    "iteration": 2,
+    "file": "ftmo_config.py",
+    "backup": "ftmo_optimization_backups/ftmo_config_iter2_20251214_205108.py",
+    "changes": [
+      "min_confluence_score -> 2",
+      "min_quality_factors -> 1"
+    ],
+    "timestamp": "2025-12-14T20:51:08.629961"
+  },
+  {
+    "iteration": 2,
+    "file": "strategy_core.py",
+    "backup": "ftmo_optimization_backups/strategy_core_iter2_20251214_205108.py",
+    "changes": [
+      "min_confluence -> 2",
+      "min_quality_factors -> 1"
+    ],
+    "timestamp": "2025-12-14T20:51:08.631442"
+  },
+  {
+    "iteration": 2,
+    "file": "main_live_bot.py",
+    "backup": "ftmo_optimization_backups/main_live_bot_iter2_20251214_205108.py",
+    "changes": [
+      "MIN_CONFLUENCE -> 2"
+    ],
+    "timestamp": "2025-12-14T20:51:08.641484"
   }
 ]

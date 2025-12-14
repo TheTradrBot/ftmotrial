@@ -2154,10 +2154,10 @@ SUCCESS CRITERIA CHECK:
         filepath = self.output_dir / filename
         
         serializable_results = {
-            "total_challenges_attempted": results["total_challenges_attempted"],
-            "challenges_passed": results["challenges_passed"],
-            "challenges_failed": results["challenges_failed"],
-            "all_results": [c.to_dict() for c in results["all_results"]],
+            "total_challenges_attempted": results.get("total_challenges_attempted", results.get("challenges_passed", 0) + results.get("challenges_failed", 0)),
+            "challenges_passed": results.get("challenges_passed", 0),
+            "challenges_failed": results.get("challenges_failed", 0),
+            "all_results": [c.to_dict() for c in results.get("all_results", [])],
         }
         
         with open(filepath, 'w') as f:
@@ -2346,40 +2346,34 @@ def run_full_period_backtest(
                 print("No data")
                 continue
             
-            filtered_daily = []
-            for candle in daily_data:
-                candle_time = candle.get("time")
-                if candle_time:
-                    if isinstance(candle_time, str):
-                        try:
-                            candle_dt = datetime.fromisoformat(candle_time.replace("Z", "+00:00"))
-                        except:
-                            continue
-                    else:
-                        candle_dt = candle_time
-                    
-                    if hasattr(candle_dt, 'replace'):
-                        candle_dt = candle_dt.replace(tzinfo=None)
-                    
-                    start_naive = start_date.replace(tzinfo=None) if start_date.tzinfo else start_date
-                    end_naive = end_date.replace(tzinfo=None) if end_date.tzinfo else end_date
-                    
-                    if start_naive <= candle_dt <= end_naive:
-                        if is_valid_trading_day(candle_dt):
-                            filtered_daily.append(candle)
-            
-            if not filtered_daily:
-                print("No data in period")
-                continue
+            # Use full daily_data (with lookback) for strategy calculation
+            # Filter trades by date after simulation to include Jan/Feb
+            start_naive = start_date.replace(tzinfo=None) if start_date.tzinfo else start_date
+            end_naive = end_date.replace(tzinfo=None) if end_date.tzinfo else end_date
             
             trades = simulate_trades(
-                candles=filtered_daily,
+                candles=daily_data,  # Use full data with lookback
                 symbol=asset,
                 params=params,
                 monthly_candles=monthly_data,
                 weekly_candles=weekly_data,
                 h4_candles=h4_data,
             )
+            
+            # Filter trades to only those within the target date range
+            date_filtered_trades = []
+            for trade in trades:
+                trade_dt = trade.entry_date
+                if isinstance(trade_dt, str):
+                    try:
+                        trade_dt = datetime.fromisoformat(trade_dt.replace("Z", "+00:00"))
+                    except:
+                        continue
+                if hasattr(trade_dt, 'replace'):
+                    trade_dt = trade_dt.replace(tzinfo=None)
+                if start_naive <= trade_dt <= end_naive:
+                    date_filtered_trades.append(trade)
+            trades = date_filtered_trades
             
             validated_trades = []
             for trade in trades:

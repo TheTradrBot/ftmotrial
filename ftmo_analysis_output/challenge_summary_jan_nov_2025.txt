@@ -5,32 +5,33 @@ FTMO CHALLENGE PERFORMANCE - JAN 2025 TO NOV 2025
 
 PERIOD: January 1, 2025 - November 30, 2025 (11 months)
 ACCOUNT SIZE: $200,000 (per challenge)
-TOTAL TRADES EXECUTED: 0
+TOTAL TRADES EXECUTED: 41
 
 CHALLENGE RESULTS:
 ------------------
 Challenges PASSED (Both Steps): 0
-Challenges FAILED: 0
+Challenges FAILED: 1
 Success Rate: 0.0%
 
 CHALLENGE DETAILS:
 ------------------
+Challenge #1: FAILED | Step 1: +0.7% | Failed at: Step 1
 
 TRADING STATISTICS:
 -------------------
-Total Trades: 0
-Winning Trades: 0
-Losing Trades: 0
-Win Rate: 0.0%
-Average R per Trade: +0.00R
-Best Trade: N/A
-Worst Trade: N/A
+Total Trades: 41
+Winning Trades: 13
+Losing Trades: 14
+Win Rate: 31.7%
+Average R per Trade: +0.07R
+Best Trade: +2.1R (NAS100_USD)
+Worst Trade: -1.0R
 
 PROFITABILITY ANALYSIS:
 -----------------------
-Gross Profit: $+0.00
-Gross Loss: $0.00
-Net Profit: $+0.00
+Gross Profit: $+25,760.56
+Gross Loss: $-24,314.20
+Net Profit: $+1,446.36
 
 EARNING POTENTIAL:
 ------------------
@@ -39,7 +40,7 @@ TOTAL FROM 0 PASSED CHALLENGES: $0.00
 SUCCESS CRITERIA CHECK:
 -----------------------
 Minimum 14 Challenges Passed: NO (0 passed, need 14 more)
-Maximum 2 Challenges Failed: YES (0 failed)
+Maximum 2 Challenges Failed: YES (1 failed)
 
 *** CRITERIA NOT MET - OPTIMIZATION REQUIRED ***
 
