@@ -62,3 +62,33 @@ The bot trades 34 assets, including Forex pairs (Majors, EUR Crosses, GBP Crosse
     -   `flask`, `flask-cors`: Web server for monitoring.
     -   `discord-py`: (Deprecated for live bot, previously used for minimal Discord monitoring).
 -   **Dukascopy**: Integrated for historical tick data validation.
+
+## Recent Changes (December 2024)
+
+### FTMO 200K Swing Account Optimizations
+1. **Trading Days Tracking**: Added automatic tracking of minimum trading days requirement (4 days) with warnings when approaching deadline without enough days traded.
+
+2. **Configuration Sync**: Synchronized all configuration values between `ftmo_config.py` and optimizer output:
+   - `risk_per_trade_pct`: 0.95%
+   - `min_confluence_score`: 3/7
+   - `min_quality_factors`: 1
+
+3. **Live Market Safeguards**: Added execution protection:
+   - `slippage_buffer_pips`: 2 pips execution buffer
+   - `max_spread_pips`: Per-symbol spread limits (rejects trades with excessive spreads)
+   - `is_spread_acceptable()`: Spread validation before trade entry
+
+4. **Weekend Holding**: Disabled weekend close (`weekend_close_enabled: False`) - Swing account allows holding positions over weekends.
+
+5. **Comprehensive Checklist**: Created `LIVE_TRADING_CHECKLIST.md` with:
+   - Pre-launch verification steps
+   - Launch day procedures
+   - Daily/weekly monitoring checklists
+   - Emergency procedures
+   - Risk management thresholds
+   - Windows Task Scheduler auto-restart setup
+
+### Key Files Updated
+- `main_live_bot.py`: Trading days tracking methods added
+- `ftmo_config.py`: Live market safeguards, weekend close disabled
+- `LIVE_TRADING_CHECKLIST.md`: Comprehensive pre-live checklist (NEW)
