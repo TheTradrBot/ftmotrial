@@ -126,6 +126,23 @@ class StrategyParams:
     zscore_threshold: float = 1.5
     use_pattern_filter: bool = True
     
+    # Blueprint V2 enhancements
+    use_mitigated_sr: bool = True  # Broken then retested SR zones
+    sr_proximity_pct: float = 0.02  # 1-2% proximity filter for SR entry
+    use_structural_framework: bool = True  # Ascending/descending channel detection
+    use_displacement_filter: bool = True  # Strong candles beyond structure
+    displacement_atr_mult: float = 1.5  # Min ATR multiplier for displacement
+    use_candle_rejection: bool = True  # Pinbar/engulfing at SR
+    
+    # Advanced quant filters
+    use_rsi_divergence: bool = True
+    rsi_period: int = 14
+    use_momentum_filter: bool = True
+    momentum_lookback: int = 10
+    use_mean_reversion: bool = True
+    bollinger_period: int = 20
+    bollinger_std: float = 2.0
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary."""
         return {
@@ -161,6 +178,19 @@ class StrategyParams:
             "use_zscore_filter": self.use_zscore_filter,
             "zscore_threshold": self.zscore_threshold,
             "use_pattern_filter": self.use_pattern_filter,
+            "use_mitigated_sr": self.use_mitigated_sr,
+            "sr_proximity_pct": self.sr_proximity_pct,
+            "use_structural_framework": self.use_structural_framework,
+            "use_displacement_filter": self.use_displacement_filter,
+            "displacement_atr_mult": self.displacement_atr_mult,
+            "use_candle_rejection": self.use_candle_rejection,
+            "use_rsi_divergence": self.use_rsi_divergence,
+            "rsi_period": self.rsi_period,
+            "use_momentum_filter": self.use_momentum_filter,
+            "momentum_lookback": self.momentum_lookback,
+            "use_mean_reversion": self.use_mean_reversion,
+            "bollinger_period": self.bollinger_period,
+            "bollinger_std": self.bollinger_std,
         }
     
     @classmethod
@@ -496,6 +526,487 @@ def _calculate_zscore(price: float, candles: List[Dict], period: int = 20) -> fl
     return zscore
 
 
+def _find_bos_swing_for_bullish_n(candles: List[Dict], lookback: int = 20) -> Optional[Tuple[float, float, int, int]]:
+    """
+    Find the Bullish N pattern anchor points for Fibonacci:
+    After a break of structure UP, find the swing low.
+    Return fib anchors from red candle close to green candle open at swing low.
+    
+    Blueprint rule: For bullish N, take fibs from red candle close to green candle open.
+    
+    Returns:
+        Tuple of (fib_start, fib_end, swing_low_idx, bos_idx) or None
+    """
+    if len(candles) < lookback + 10:
+        return None
+    
+    recent = candles[-(lookback + 10):]
+    
+    bos_idx = None
+    for i in range(len(recent) - 1, 4, -1):
+        candle = recent[i]
+        prev_high = max(c["high"] for c in recent[max(0, i-5):i])
+        if candle["close"] > prev_high and candle["close"] > candle["open"]:
+            is_strong = (candle["high"] - candle["low"]) > 0
+            if is_strong:
+                bos_idx = i
+                break
+    
+    if bos_idx is None:
+        return None
+    
+    swing_low_idx = None
+    swing_low_val = float('inf')
+    for i in range(bos_idx - 1, max(0, bos_idx - 10), -1):
+        if recent[i]["low"] < swing_low_val:
+            swing_low_val = recent[i]["low"]
+            swing_low_idx = i
+    
+    if swing_low_idx is None:
+        return None
+    
+    red_candle_close = None
+    green_candle_open = None
+    
+    for i in range(swing_low_idx, min(len(recent), swing_low_idx + 3)):
+        c = recent[i]
+        if c["close"] < c["open"]:  # Red/bearish candle
+            red_candle_close = c["close"]
+        elif c["close"] > c["open"] and red_candle_close is not None:  # Green/bullish after red
+            green_candle_open = c["open"]
+            break
+    
+    if red_candle_close is None:
+        red_candle_close = swing_low_val
+    if green_candle_open is None:
+        green_candle_open = recent[min(swing_low_idx + 1, len(recent) - 1)]["open"]
+    
+    fib_start = min(red_candle_close, green_candle_open)
+    fib_end = recent[bos_idx]["high"]
+    
+    return (fib_start, fib_end, swing_low_idx, bos_idx)
+
+
+def _find_bos_swing_for_bearish_v(candles: List[Dict], lookback: int = 20) -> Optional[Tuple[float, float, int, int]]:
+    """
+    Find the Bearish V pattern anchor points for Fibonacci:
+    After a break of structure DOWN, find the swing high.
+    Return fib anchors from green candle close to red candle open at swing high.
+    
+    Blueprint rule: For bearish V (shorts), take fibs from green candle close to red candle open.
+    
+    Returns:
+        Tuple of (fib_start, fib_end, swing_high_idx, bos_idx) or None
+    """
+    if len(candles) < lookback + 10:
+        return None
+    
+    recent = candles[-(lookback + 10):]
+    
+    bos_idx = None
+    for i in range(len(recent) - 1, 4, -1):
+        candle = recent[i]
+        prev_low = min(c["low"] for c in recent[max(0, i-5):i])
+        if candle["close"] < prev_low and candle["close"] < candle["open"]:
+            is_strong = (candle["high"] - candle["low"]) > 0
+            if is_strong:
+                bos_idx = i
+                break
+    
+    if bos_idx is None:
+        return None
+    
+    swing_high_idx = None
+    swing_high_val = float('-inf')
+    for i in range(bos_idx - 1, max(0, bos_idx - 10), -1):
+        if recent[i]["high"] > swing_high_val:
+            swing_high_val = recent[i]["high"]
+            swing_high_idx = i
+    
+    if swing_high_idx is None:
+        return None
+    
+    green_candle_close = None
+    red_candle_open = None
+    
+    for i in range(swing_high_idx, min(len(recent), swing_high_idx + 3)):
+        c = recent[i]
+        if c["close"] > c["open"]:  # Green/bullish candle
+            green_candle_close = c["close"]
+        elif c["close"] < c["open"] and green_candle_close is not None:  # Red/bearish after green
+            red_candle_open = c["open"]
+            break
+    
+    if green_candle_close is None:
+        green_candle_close = swing_high_val
+    if red_candle_open is None:
+        red_candle_open = recent[min(swing_high_idx + 1, len(recent) - 1)]["open"]
+    
+    fib_start = max(green_candle_close, red_candle_open)
+    fib_end = recent[bos_idx]["low"]
+    
+    return (fib_start, fib_end, swing_high_idx, bos_idx)
+
+
+def _detect_mitigated_sr(candles: List[Dict], price: float, direction: str, 
+                         proximity_pct: float = 0.02) -> Tuple[bool, str, Optional[float]]:
+    """
+    Detect mitigated S/R zones - zones that were broken then retested.
+    
+    A mitigated zone is more reliable because it shows the level has been
+    tested, broken, and is now acting as support (former resistance) or
+    resistance (former support).
+    
+    Args:
+        candles: OHLCV candles
+        price: Current price
+        direction: Trade direction
+        proximity_pct: How close price must be to zone (default 2%)
+    
+    Returns:
+        Tuple of (is_at_mitigated_sr, note, sr_level)
+    """
+    if len(candles) < 50:
+        return False, "Mitigated SR: Insufficient data", None
+    
+    swing_highs_with_idx = []
+    swing_lows_with_idx = []
+    lookback = 3
+    
+    for i in range(lookback, len(candles) - lookback):
+        high = candles[i]["high"]
+        low = candles[i]["low"]
+        
+        is_swing_high = all(candles[j]["high"] <= high for j in range(i - lookback, i + lookback + 1) if j != i)
+        is_swing_low = all(candles[j]["low"] >= low for j in range(i - lookback, i + lookback + 1) if j != i)
+        
+        if is_swing_high:
+            swing_highs_with_idx.append((high, i))
+        if is_swing_low:
+            swing_lows_with_idx.append((low, i))
+    
+    mitigated_levels = []
+    
+    for sr_level, sr_idx in swing_highs_with_idx:
+        was_broken = False
+        was_retested = False
+        for i in range(sr_idx + 1, len(candles)):
+            if candles[i]["close"] > sr_level:
+                was_broken = True
+            if was_broken and candles[i]["low"] <= sr_level <= candles[i]["high"]:
+                was_retested = True
+                break
+        if was_broken and was_retested:
+            mitigated_levels.append(("resistance_turned_support", sr_level))
+    
+    for sr_level, sr_idx in swing_lows_with_idx:
+        was_broken = False
+        was_retested = False
+        for i in range(sr_idx + 1, len(candles)):
+            if candles[i]["close"] < sr_level:
+                was_broken = True
+            if was_broken and candles[i]["low"] <= sr_level <= candles[i]["high"]:
+                was_retested = True
+                break
+        if was_broken and was_retested:
+            mitigated_levels.append(("support_turned_resistance", sr_level))
+    
+    for level_type, level in mitigated_levels:
+        distance_pct = abs(price - level) / price if price > 0 else 0
+        
+        if distance_pct <= proximity_pct:
+            if direction == "bullish" and level_type == "resistance_turned_support":
+                return True, f"Mitigated SR: At RTS level {level:.5f} (within {distance_pct:.1%})", level
+            elif direction == "bearish" and level_type == "support_turned_resistance":
+                return True, f"Mitigated SR: At STR level {level:.5f} (within {distance_pct:.1%})", level
+    
+    return False, "Mitigated SR: No qualified level nearby", None
+
+
+def _detect_structural_framework(candles: List[Dict], direction: str) -> Tuple[bool, str, Optional[Tuple[float, float]]]:
+    """
+    Detect ascending/descending channel frameworks on daily timeframe.
+    
+    Framework detection:
+    - Ascending channel: Connect 3+ swing lows (ascending) and 3+ swing highs (ascending)
+    - Descending channel: Connect 3+ swing highs (descending) and 3+ swing lows (descending)
+    
+    Returns:
+        Tuple of (is_in_framework, note, (lower_bound, upper_bound) or None)
+    """
+    if len(candles) < 30:
+        return False, "Framework: Insufficient data", None
+    
+    swing_highs, swing_lows = [], []
+    lookback = 3
+    
+    for i in range(lookback, len(candles) - lookback):
+        high = candles[i]["high"]
+        low = candles[i]["low"]
+        
+        is_swing_high = all(candles[j]["high"] <= high for j in range(i - lookback, i + lookback + 1) if j != i)
+        is_swing_low = all(candles[j]["low"] >= low for j in range(i - lookback, i + lookback + 1) if j != i)
+        
+        if is_swing_high:
+            swing_highs.append((i, high))
+        if is_swing_low:
+            swing_lows.append((i, low))
+    
+    if len(swing_lows) < 3 or len(swing_highs) < 3:
+        return False, "Framework: Not enough swing points", None
+    
+    recent_lows = swing_lows[-5:]
+    ascending_lows = all(recent_lows[i][1] <= recent_lows[i+1][1] for i in range(len(recent_lows)-1))
+    descending_lows = all(recent_lows[i][1] >= recent_lows[i+1][1] for i in range(len(recent_lows)-1))
+    
+    recent_highs = swing_highs[-5:]
+    ascending_highs = all(recent_highs[i][1] <= recent_highs[i+1][1] for i in range(len(recent_highs)-1))
+    descending_highs = all(recent_highs[i][1] >= recent_highs[i+1][1] for i in range(len(recent_highs)-1))
+    
+    current_price = candles[-1]["close"]
+    last_low = swing_lows[-1][1] if swing_lows else candles[-1]["low"]
+    last_high = swing_highs[-1][1] if swing_highs else candles[-1]["high"]
+    
+    if ascending_lows and ascending_highs:
+        if direction == "bullish":
+            price_position = (current_price - last_low) / (last_high - last_low) if last_high > last_low else 0.5
+            if price_position < 0.4:
+                return True, f"Framework: Ascending channel - price near lower bound ({price_position:.0%})", (last_low, last_high)
+        return False, "Framework: Ascending channel but not at optimal entry", (last_low, last_high)
+    
+    elif descending_lows and descending_highs:
+        if direction == "bearish":
+            price_position = (current_price - last_low) / (last_high - last_low) if last_high > last_low else 0.5
+            if price_position > 0.6:
+                return True, f"Framework: Descending channel - price near upper bound ({price_position:.0%})", (last_low, last_high)
+        return False, "Framework: Descending channel but not at optimal entry", (last_low, last_high)
+    
+    return False, "Framework: No clear channel detected", None
+
+
+def _detect_displacement(candles: List[Dict], direction: str, atr_mult: float = 1.5) -> Tuple[bool, str]:
+    """
+    Detect displacement - strong candles beyond structure confirming the move.
+    
+    Displacement = large body candle that shows institutional order flow.
+    Must be at least atr_mult * ATR in body size.
+    
+    Returns:
+        Tuple of (has_displacement, note)
+    """
+    if len(candles) < 20:
+        return False, "Displacement: Insufficient data"
+    
+    atr = _atr(candles, 14)
+    if atr <= 0:
+        return False, "Displacement: ATR calculation failed"
+    
+    min_body = atr * atr_mult
+    
+    for i in range(-5, 0):
+        if abs(i) > len(candles):
+            continue
+        c = candles[i]
+        body = abs(c["close"] - c["open"])
+        
+        if body >= min_body:
+            if direction == "bullish" and c["close"] > c["open"]:
+                return True, f"Displacement: Strong bullish candle ({body/atr:.1f}x ATR)"
+            elif direction == "bearish" and c["close"] < c["open"]:
+                return True, f"Displacement: Strong bearish candle ({body/atr:.1f}x ATR)"
+    
+    return False, "Displacement: No strong impulse candle found"
+
+
+def _detect_candle_rejection(candles: List[Dict], direction: str) -> Tuple[bool, str]:
+    """
+    Detect pinbar or engulfing rejection patterns at current price.
+    
+    Returns:
+        Tuple of (has_rejection, note)
+    """
+    if len(candles) < 3:
+        return False, "Rejection: Insufficient data"
+    
+    curr = candles[-1]
+    prev = candles[-2]
+    
+    body = abs(curr["close"] - curr["open"])
+    full_range = curr["high"] - curr["low"]
+    upper_wick = curr["high"] - max(curr["close"], curr["open"])
+    lower_wick = min(curr["close"], curr["open"]) - curr["low"]
+    
+    if full_range > 0:
+        body_ratio = body / full_range
+        
+        if direction == "bullish":
+            if lower_wick > body * 2 and lower_wick > upper_wick * 1.5:
+                return True, "Rejection: Bullish pinbar (long lower wick)"
+            if curr["close"] > curr["open"] and curr["close"] > prev["high"] and curr["open"] < prev["low"]:
+                return True, "Rejection: Bullish engulfing pattern"
+            if curr["close"] > curr["open"] and lower_wick > body:
+                return True, "Rejection: Hammer pattern"
+        else:
+            if upper_wick > body * 2 and upper_wick > lower_wick * 1.5:
+                return True, "Rejection: Bearish pinbar (long upper wick)"
+            if curr["close"] < curr["open"] and curr["open"] > prev["high"] and curr["close"] < prev["low"]:
+                return True, "Rejection: Bearish engulfing pattern"
+            if curr["close"] < curr["open"] and upper_wick > body:
+                return True, "Rejection: Shooting star pattern"
+    
+    return False, "Rejection: No clear rejection pattern"
+
+
+def _calculate_rsi(candles: List[Dict], period: int = 14) -> float:
+    """Calculate RSI indicator."""
+    if len(candles) < period + 1:
+        return 50.0
+    
+    closes = [c["close"] for c in candles[-(period + 1):]]
+    gains, losses = [], []
+    
+    for i in range(1, len(closes)):
+        change = closes[i] - closes[i-1]
+        if change > 0:
+            gains.append(change)
+            losses.append(0)
+        else:
+            gains.append(0)
+            losses.append(abs(change))
+    
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    
+    if avg_loss == 0:
+        return 100.0
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
+
+
+def _detect_rsi_divergence(candles: List[Dict], direction: str, period: int = 14) -> Tuple[bool, str]:
+    """
+    Detect RSI divergence for confirmation.
+    
+    Bullish divergence: Price makes lower low but RSI makes higher low
+    Bearish divergence: Price makes higher high but RSI makes lower high
+    
+    Returns:
+        Tuple of (has_divergence, note)
+    """
+    if len(candles) < period + 20:
+        return False, "RSI Divergence: Insufficient data"
+    
+    rsi_values = []
+    for i in range(20):
+        end_idx = len(candles) - 19 + i
+        slice_candles = candles[:end_idx + 1]
+        rsi = _calculate_rsi(slice_candles, period)
+        rsi_values.append(rsi)
+    
+    price_lows = [candles[-(20-i)]["low"] for i in range(20)]
+    price_highs = [candles[-(20-i)]["high"] for i in range(20)]
+    
+    if direction == "bullish":
+        recent_price_low = min(price_lows[-10:])
+        older_price_low = min(price_lows[:10])
+        recent_rsi_low = min(rsi_values[-10:])
+        older_rsi_low = min(rsi_values[:10])
+        
+        if recent_price_low < older_price_low and recent_rsi_low > older_rsi_low:
+            return True, f"RSI Divergence: Bullish (price LL, RSI HL) - RSI: {rsi_values[-1]:.1f}"
+    else:
+        recent_price_high = max(price_highs[-10:])
+        older_price_high = max(price_highs[:10])
+        recent_rsi_high = max(rsi_values[-10:])
+        older_rsi_high = max(rsi_values[:10])
+        
+        if recent_price_high > older_price_high and recent_rsi_high < older_rsi_high:
+            return True, f"RSI Divergence: Bearish (price HH, RSI LH) - RSI: {rsi_values[-1]:.1f}"
+    
+    current_rsi = rsi_values[-1]
+    if direction == "bullish" and current_rsi < 35:
+        return True, f"RSI Divergence: Oversold ({current_rsi:.1f}) - potential bounce"
+    elif direction == "bearish" and current_rsi > 65:
+        return True, f"RSI Divergence: Overbought ({current_rsi:.1f}) - potential drop"
+    
+    return False, f"RSI Divergence: No divergence detected (RSI: {current_rsi:.1f})"
+
+
+def _detect_momentum(candles: List[Dict], direction: str, lookback: int = 10) -> Tuple[bool, str]:
+    """
+    Detect momentum alignment using rate of change.
+    
+    Returns:
+        Tuple of (momentum_aligned, note)
+    """
+    if len(candles) < lookback + 5:
+        return False, "Momentum: Insufficient data"
+    
+    closes = [c["close"] for c in candles[-(lookback + 5):]]
+    
+    current = closes[-1]
+    past = closes[-lookback]
+    roc = ((current - past) / past) * 100 if past > 0 else 0
+    
+    short_roc = ((closes[-1] - closes[-5]) / closes[-5]) * 100 if closes[-5] > 0 else 0
+    
+    if direction == "bullish":
+        if roc > 0 and short_roc > 0:
+            return True, f"Momentum: Bullish aligned (ROC: {roc:.2f}%, Short: {short_roc:.2f}%)"
+        elif roc < -2 and short_roc > 0:
+            return True, f"Momentum: Mean reversion setup (pulling back in downtrend, bounce starting)"
+    else:
+        if roc < 0 and short_roc < 0:
+            return True, f"Momentum: Bearish aligned (ROC: {roc:.2f}%, Short: {short_roc:.2f}%)"
+        elif roc > 2 and short_roc < 0:
+            return True, f"Momentum: Mean reversion setup (rallying in uptrend, reversal starting)"
+    
+    return False, f"Momentum: Not aligned (ROC: {roc:.2f}%, Short: {short_roc:.2f}%)"
+
+
+def _detect_bollinger_mean_reversion(candles: List[Dict], direction: str, 
+                                     period: int = 20, std_mult: float = 2.0) -> Tuple[bool, str]:
+    """
+    Detect mean reversion setup using Bollinger Bands.
+    
+    Returns:
+        Tuple of (is_mean_reversion_setup, note)
+    """
+    if len(candles) < period + 5:
+        return False, "Bollinger: Insufficient data"
+    
+    closes = [c["close"] for c in candles[-period:]]
+    
+    mean = sum(closes) / len(closes)
+    variance = sum((x - mean) ** 2 for x in closes) / len(closes)
+    std = variance ** 0.5
+    
+    upper_band = mean + std_mult * std
+    lower_band = mean - std_mult * std
+    
+    current_price = closes[-1]
+    
+    if direction == "bullish":
+        if current_price <= lower_band:
+            return True, f"Bollinger: At lower band ({current_price:.5f} <= {lower_band:.5f}) - bounce expected"
+        elif current_price < mean:
+            band_position = (current_price - lower_band) / (mean - lower_band) if mean > lower_band else 0.5
+            if band_position < 0.3:
+                return True, f"Bollinger: Near lower band ({band_position:.0%} from lower) - mean reversion setup"
+    else:
+        if current_price >= upper_band:
+            return True, f"Bollinger: At upper band ({current_price:.5f} >= {upper_band:.5f}) - drop expected"
+        elif current_price > mean:
+            band_position = (current_price - mean) / (upper_band - mean) if upper_band > mean else 0.5
+            if band_position > 0.7:
+                return True, f"Bollinger: Near upper band ({band_position:.0%} from mean) - mean reversion setup"
+    
+    return False, f"Bollinger: Not at extreme (price: {current_price:.5f}, bands: {lower_band:.5f}-{upper_band:.5f})"
+
+
 def _find_pivots(candles: List[Dict], lookback: int = 5) -> Tuple[List[float], List[float]]:
     """
     Find swing highs and swing lows in candle data.
@@ -755,13 +1266,31 @@ def _fib_context(
 
 def _find_last_swing_leg_for_fib(candles: List[Dict], direction: str) -> Optional[Tuple[float, float]]:
     """
-    Find the last swing leg for Fibonacci calculation.
+    Find the last swing leg for Fibonacci calculation using proper Blueprint anchoring.
+    
+    Blueprint rules:
+    - Bullish N: After BOS up, fibs from red candle close to green candle open at swing low
+    - Bearish V: After BOS down, fibs from green candle close to red candle open at swing high
     
     Returns:
-        Tuple of (swing_low, swing_high) or None
+        Tuple of (fib_low, fib_high) or None
     """
     if not candles or len(candles) < 20:
         return None
+    
+    try:
+        if direction == "bullish":
+            result = _find_bos_swing_for_bullish_n(candles, lookback=20)
+            if result:
+                fib_start, fib_end, _, _ = result
+                return (fib_start, fib_end)
+        else:
+            result = _find_bos_swing_for_bearish_v(candles, lookback=20)
+            if result:
+                fib_start, fib_end, _, _ = result
+                return (fib_end, fib_start)
+    except Exception:
+        pass
     
     try:
         swing_highs, swing_lows = _find_pivots(candles, lookback=3)
@@ -1119,6 +1648,49 @@ def compute_confluence(
     else:
         zscore_valid, zscore_note = True, "Z-score filter disabled"
     
+    # Blueprint V2 enhancements
+    if params.use_mitigated_sr:
+        mitigated_sr_ok, mitigated_sr_note, _ = _detect_mitigated_sr(
+            daily_candles, price, direction, params.sr_proximity_pct
+        )
+    else:
+        mitigated_sr_ok, mitigated_sr_note = True, "Mitigated SR disabled"
+    
+    if params.use_structural_framework:
+        framework_ok, framework_note, _ = _detect_structural_framework(daily_candles, direction)
+    else:
+        framework_ok, framework_note = True, "Framework disabled"
+    
+    if params.use_displacement_filter:
+        displacement_ok, displacement_note = _detect_displacement(
+            daily_candles, direction, params.displacement_atr_mult
+        )
+    else:
+        displacement_ok, displacement_note = True, "Displacement disabled"
+    
+    if params.use_candle_rejection:
+        rejection_ok, rejection_note = _detect_candle_rejection(h4_candles if h4_candles else daily_candles, direction)
+    else:
+        rejection_ok, rejection_note = True, "Candle rejection disabled"
+    
+    # Advanced quant filters
+    if params.use_rsi_divergence:
+        rsi_div_ok, rsi_div_note = _detect_rsi_divergence(daily_candles, direction, params.rsi_period)
+    else:
+        rsi_div_ok, rsi_div_note = True, "RSI divergence disabled"
+    
+    if params.use_momentum_filter:
+        momentum_ok, momentum_note = _detect_momentum(daily_candles, direction, params.momentum_lookback)
+    else:
+        momentum_ok, momentum_note = True, "Momentum filter disabled"
+    
+    if params.use_mean_reversion:
+        mean_rev_ok, mean_rev_note = _detect_bollinger_mean_reversion(
+            daily_candles, direction, params.bollinger_period, params.bollinger_std
+        )
+    else:
+        mean_rev_ok, mean_rev_note = True, "Mean reversion disabled"
+    
     rr_note, rr_ok, entry, sl, tp1, tp2, tp3, tp4, tp5 = compute_trade_levels(
         daily_candles, direction, params, h4_candles
     )
@@ -1134,6 +1706,13 @@ def compute_confluence(
         "atr_regime_ok": atr_regime_ok,
         "pattern_confirmed": pattern_ok,
         "zscore_valid": zscore_valid,
+        "mitigated_sr": mitigated_sr_ok,
+        "framework": framework_ok,
+        "displacement": displacement_ok,
+        "rejection": rejection_ok,
+        "rsi_divergence": rsi_div_ok,
+        "momentum": momentum_ok,
+        "mean_reversion": mean_rev_ok,
     }
     
     notes = {
@@ -1147,6 +1726,13 @@ def compute_confluence(
         "atr_regime": atr_regime_note,
         "pattern": pattern_note,
         "zscore": zscore_note,
+        "mitigated_sr": mitigated_sr_note,
+        "framework": framework_note,
+        "displacement": displacement_note,
+        "rejection": rejection_note,
+        "rsi_divergence": rsi_div_note,
+        "momentum": momentum_note,
+        "mean_reversion": mean_rev_note,
     }
     
     trade_levels = (entry, sl, tp1, tp2, tp3, tp4, tp5)
