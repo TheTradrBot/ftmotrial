@@ -119,6 +119,13 @@ class StrategyParams:
     tp4_close_pct: float = 0.20  # Close 20% at TP4
     tp5_close_pct: float = 0.45  # Close 45% at TP5
     
+    # Quantitative enhancement filters
+    use_atr_regime_filter: bool = True
+    atr_min_percentile: float = 60.0
+    use_zscore_filter: bool = True
+    zscore_threshold: float = 1.5
+    use_pattern_filter: bool = True
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary."""
         return {
@@ -149,6 +156,11 @@ class StrategyParams:
             "tp3_close_pct": self.tp3_close_pct,
             "tp4_close_pct": self.tp4_close_pct,
             "tp5_close_pct": self.tp5_close_pct,
+            "use_atr_regime_filter": self.use_atr_regime_filter,
+            "atr_min_percentile": self.atr_min_percentile,
+            "use_zscore_filter": self.use_zscore_filter,
+            "zscore_threshold": self.zscore_threshold,
+            "use_pattern_filter": self.use_pattern_filter,
         }
     
     @classmethod
@@ -270,6 +282,218 @@ def _atr(candles: List[Dict], period: int = 14) -> float:
         atr_val = (atr_val * (period - 1) + tr) / period
     
     return atr_val
+
+
+def _calculate_atr_percentile(candles: List[Dict], period: int = 14, lookback: int = 100) -> Tuple[float, float]:
+    """
+    Calculate current ATR and its percentile rank over the lookback period.
+    
+    Args:
+        candles: List of OHLCV candle dictionaries
+        period: ATR period (default 14)
+        lookback: Number of days to calculate percentile over (default 100)
+    
+    Returns:
+        Tuple of (current_atr, percentile_rank 0-100)
+    """
+    if len(candles) < period + lookback:
+        current_atr = _atr(candles, period)
+        return current_atr, 50.0
+    
+    atr_values = []
+    for i in range(lookback):
+        end_idx = len(candles) - i
+        if end_idx < period + 1:
+            break
+        slice_candles = candles[:end_idx]
+        atr_val = _atr(slice_candles, period)
+        if atr_val > 0:
+            atr_values.append(atr_val)
+    
+    if not atr_values:
+        return 0.0, 50.0
+    
+    current_atr = atr_values[0]
+    
+    sorted_atrs = sorted(atr_values)
+    rank = sum(1 for v in sorted_atrs if v <= current_atr)
+    percentile = (rank / len(sorted_atrs)) * 100
+    
+    return current_atr, percentile
+
+
+def calculate_volatility_parity_risk(
+    atr: float,
+    base_risk_pct: float,
+    reference_atr: Optional[float] = None,
+    min_risk_pct: float = 0.25,
+    max_risk_pct: float = 2.0,
+) -> float:
+    """
+    Calculate volatility parity adjusted risk percentage.
+    
+    Volatility parity ensures equal dollar risk per ATR unit across all symbols,
+    normalizing position sizes based on current volatility.
+    
+    Args:
+        atr: Current ATR value for the symbol
+        base_risk_pct: Base risk percentage (e.g., 0.5 for 0.5%)
+        reference_atr: Reference ATR for normalization. If None or 0, returns base risk.
+        min_risk_pct: Minimum risk percentage floor (default 0.25%)
+        max_risk_pct: Maximum risk percentage cap (default 2.0%)
+    
+    Returns:
+        Adjusted risk percentage capped between min and max
+        
+    Example:
+        If reference_atr=0.0010 and current atr=0.0020 (2x more volatile):
+        adjusted_risk = base_risk * (0.0010 / 0.0020) = base_risk * 0.5
+        This reduces position size for more volatile instruments.
+    """
+    if atr <= 0 or reference_atr is None or reference_atr <= 0:
+        return max(min_risk_pct, min(max_risk_pct, base_risk_pct))
+    
+    adjustment_ratio = reference_atr / atr
+    adjusted_risk = base_risk_pct * adjustment_ratio
+    
+    return max(min_risk_pct, min(max_risk_pct, adjusted_risk))
+
+
+def _detect_bullish_n_pattern(candles: List[Dict], lookback: int = 10) -> Tuple[bool, str]:
+    """
+    Detect Bullish N pattern: impulse up, pullback, higher low formation.
+    
+    Pattern criteria:
+    1. Initial impulse up (significant up move)
+    2. Pullback/retracement (down move that doesn't break prior low)
+    3. Higher low confirmed (new low above previous swing low)
+    
+    Args:
+        candles: List of OHLCV candle dictionaries
+        lookback: Number of candles to analyze (default 10)
+    
+    Returns:
+        Tuple of (pattern_detected, description)
+    """
+    if len(candles) < lookback + 5:
+        return False, "Insufficient data for pattern detection"
+    
+    recent = candles[-(lookback + 5):]
+    
+    swing_highs, swing_lows = _find_pivots(recent, lookback=2)
+    
+    if len(swing_lows) < 2 or len(swing_highs) < 1:
+        return False, "Not enough swing points"
+    
+    last_low = swing_lows[-1]
+    prev_low = swing_lows[-2]
+    last_high = swing_highs[-1] if swing_highs else recent[-1]["high"]
+    
+    higher_low = last_low > prev_low
+    
+    impulse_range = last_high - prev_low
+    atr = _atr(candles, 14)
+    significant_impulse = impulse_range > atr * 1.5 if atr > 0 else False
+    
+    current_price = recent[-1]["close"]
+    pullback_depth = (last_high - current_price) / impulse_range if impulse_range > 0 else 0
+    valid_pullback = 0.2 <= pullback_depth <= 0.7
+    
+    if higher_low and significant_impulse and valid_pullback:
+        return True, f"Bullish N: Higher low at {last_low:.5f}, impulse from {prev_low:.5f}"
+    elif higher_low and significant_impulse:
+        return True, f"Bullish N forming: Higher low confirmed, awaiting pullback"
+    elif higher_low:
+        return False, "Higher low present but no clear impulse"
+    else:
+        return False, "No Bullish N pattern detected"
+
+
+def _detect_bearish_v_pattern(candles: List[Dict], lookback: int = 10) -> Tuple[bool, str]:
+    """
+    Detect Bearish V pattern: impulse down, pullback, lower high formation.
+    
+    Pattern criteria:
+    1. Initial impulse down (significant down move)
+    2. Pullback/retracement (up move that doesn't break prior high)
+    3. Lower high confirmed (new high below previous swing high)
+    
+    Args:
+        candles: List of OHLCV candle dictionaries
+        lookback: Number of candles to analyze (default 10)
+    
+    Returns:
+        Tuple of (pattern_detected, description)
+    """
+    if len(candles) < lookback + 5:
+        return False, "Insufficient data for pattern detection"
+    
+    recent = candles[-(lookback + 5):]
+    
+    swing_highs, swing_lows = _find_pivots(recent, lookback=2)
+    
+    if len(swing_highs) < 2 or len(swing_lows) < 1:
+        return False, "Not enough swing points"
+    
+    last_high = swing_highs[-1]
+    prev_high = swing_highs[-2]
+    last_low = swing_lows[-1] if swing_lows else recent[-1]["low"]
+    
+    lower_high = last_high < prev_high
+    
+    impulse_range = prev_high - last_low
+    atr = _atr(candles, 14)
+    significant_impulse = impulse_range > atr * 1.5 if atr > 0 else False
+    
+    current_price = recent[-1]["close"]
+    pullback_depth = (current_price - last_low) / impulse_range if impulse_range > 0 else 0
+    valid_pullback = 0.2 <= pullback_depth <= 0.7
+    
+    if lower_high and significant_impulse and valid_pullback:
+        return True, f"Bearish V: Lower high at {last_high:.5f}, impulse from {prev_high:.5f}"
+    elif lower_high and significant_impulse:
+        return True, f"Bearish V forming: Lower high confirmed, awaiting pullback"
+    elif lower_high:
+        return False, "Lower high present but no clear impulse"
+    else:
+        return False, "No Bearish V pattern detected"
+
+
+def _calculate_zscore(price: float, candles: List[Dict], period: int = 20) -> float:
+    """
+    Calculate z-score of current price relative to moving average.
+    
+    Z-score measures how many standard deviations the price is from the mean.
+    - Z-score < 0: Price below mean
+    - Z-score > 0: Price above mean
+    - |Z-score| > 2: Extreme deviation
+    
+    Args:
+        price: Current price
+        candles: List of OHLCV candle dictionaries
+        period: Period for mean/std calculation (default 20)
+    
+    Returns:
+        Z-score value (0.0 if insufficient data)
+    """
+    if len(candles) < period:
+        return 0.0
+    
+    closes = [c["close"] for c in candles[-period:] if c.get("close") is not None]
+    
+    if len(closes) < period:
+        return 0.0
+    
+    mean = sum(closes) / len(closes)
+    
+    variance = sum((x - mean) ** 2 for x in closes) / len(closes)
+    std = variance ** 0.5
+    
+    if std == 0:
+        return 0.0
+    
+    zscore = (price - mean) / std
+    return zscore
 
 
 def _find_pivots(candles: List[Dict], lookback: int = 5) -> Tuple[List[float], List[float]]:
@@ -869,6 +1093,32 @@ def compute_confluence(
     else:
         conf_note, conf_ok = "Confirmation filter disabled", True
     
+    if params.use_atr_regime_filter:
+        _, atr_percentile = _calculate_atr_percentile(daily_candles, period=14, lookback=100)
+        atr_regime_ok = atr_percentile >= params.atr_min_percentile
+        atr_regime_note = f"ATR Regime: {atr_percentile:.1f}th percentile ({'OK' if atr_regime_ok else 'Low volatility'})"
+    else:
+        atr_regime_ok, atr_regime_note = True, "ATR regime filter disabled"
+    
+    if params.use_pattern_filter:
+        if direction == "bullish":
+            pattern_ok, pattern_note = _detect_bullish_n_pattern(daily_candles, lookback=10)
+        else:
+            pattern_ok, pattern_note = _detect_bearish_v_pattern(daily_candles, lookback=10)
+    else:
+        pattern_ok, pattern_note = True, "Pattern filter disabled"
+    
+    if params.use_zscore_filter:
+        zscore = _calculate_zscore(price, daily_candles, period=20)
+        if direction == "bullish":
+            zscore_valid = zscore < -1.0
+            zscore_note = f"Z-Score: {zscore:.2f} ({'Valid <-1.0' if zscore_valid else 'Above -1.0, not ideal for long'})"
+        else:
+            zscore_valid = zscore > 1.0
+            zscore_note = f"Z-Score: {zscore:.2f} ({'Valid >1.0' if zscore_valid else 'Below 1.0, not ideal for short'})"
+    else:
+        zscore_valid, zscore_note = True, "Z-score filter disabled"
+    
     rr_note, rr_ok, entry, sl, tp1, tp2, tp3, tp4, tp5 = compute_trade_levels(
         daily_candles, direction, params, h4_candles
     )
@@ -881,6 +1131,9 @@ def compute_confluence(
         "structure": struct_ok,
         "confirmation": conf_ok,
         "rr": rr_ok,
+        "atr_regime_ok": atr_regime_ok,
+        "pattern_confirmed": pattern_ok,
+        "zscore_valid": zscore_valid,
     }
     
     notes = {
@@ -891,6 +1144,9 @@ def compute_confluence(
         "structure": struct_note,
         "confirmation": conf_note,
         "rr": rr_note,
+        "atr_regime": atr_regime_note,
+        "pattern": pattern_note,
+        "zscore": zscore_note,
     }
     
     trade_levels = (entry, sl, tp1, tp2, tp3, tp4, tp5)

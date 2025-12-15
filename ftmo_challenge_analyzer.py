@@ -15,10 +15,12 @@ This module provides a comprehensive backtesting and self-optimizing system that
 import json
 import csv
 import os
+import random
+import numpy as np
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Union
 import pandas as pd
 
 from strategy_core import (
@@ -64,6 +66,156 @@ QUARTERS_2024 = {
     "Q3": (datetime(2024, 7, 1), datetime(2024, 9, 30)),
     "Q4": (datetime(2024, 10, 1), datetime(2024, 12, 31)),
 }
+
+
+class MonteCarloSimulator:
+    """
+    Monte Carlo simulation for robustness testing of trading strategies.
+    
+    Resamples trades with replacement and perturbs P&L to generate
+    distribution of possible outcomes and confidence intervals.
+    """
+    
+    def __init__(self, trades: List[Union[Trade, Any]], num_simulations: int = 1000):
+        """
+        Initialize Monte Carlo simulator.
+        
+        Args:
+            trades: List of Trade objects or objects with rr/r_multiple attribute
+            num_simulations: Number of Monte Carlo iterations (default 1000)
+        """
+        self.trades = trades
+        self.num_simulations = num_simulations
+        self.r_values = self._extract_r_values()
+    
+    def _extract_r_values(self) -> List[float]:
+        """Extract R-multiple values from trades."""
+        r_values = []
+        for t in self.trades:
+            r = getattr(t, 'rr', None) or getattr(t, 'r_multiple', None) or 0.0
+            r_values.append(float(r))
+        return r_values
+    
+    def run_simulation(self) -> Dict[str, Any]:
+        """
+        Run Monte Carlo simulation with trade resampling and P&L perturbation.
+        
+        Returns:
+            Dict with simulation results including confidence intervals
+        """
+        if not self.r_values:
+            return {
+                "error": "No trades to simulate",
+                "num_simulations": 0,
+                "confidence_intervals": {},
+            }
+        
+        np.random.seed(42)
+        
+        final_equities = []
+        max_drawdowns = []
+        win_rates = []
+        total_returns = []
+        
+        num_trades = len(self.r_values)
+        
+        for _ in range(self.num_simulations):
+            indices = np.random.choice(num_trades, size=num_trades, replace=True)
+            resampled_trades = [self.r_values[i] for i in indices]
+            
+            noise = np.random.uniform(0.9, 1.1, size=num_trades)
+            perturbed_trades = [r * n for r, n in zip(resampled_trades, noise)]
+            
+            equity_curve = [0.0]
+            for r in perturbed_trades:
+                equity_curve.append(equity_curve[-1] + r)
+            
+            final_equity = equity_curve[-1]
+            final_equities.append(final_equity)
+            total_returns.append(final_equity)
+            
+            peak = equity_curve[0]
+            max_dd = 0.0
+            for eq in equity_curve:
+                if eq > peak:
+                    peak = eq
+                dd = peak - eq
+                if dd > max_dd:
+                    max_dd = dd
+            max_drawdowns.append(max_dd)
+            
+            wins = sum(1 for r in perturbed_trades if r > 0)
+            win_rates.append(wins / num_trades * 100 if num_trades > 0 else 0)
+        
+        percentiles = [5, 25, 50, 75, 95]
+        
+        return {
+            "num_simulations": self.num_simulations,
+            "num_trades": num_trades,
+            "mean_return": float(np.mean(total_returns)),
+            "std_return": float(np.std(total_returns)),
+            "mean_max_dd": float(np.mean(max_drawdowns)),
+            "mean_win_rate": float(np.mean(win_rates)),
+            "confidence_intervals": {
+                "final_equity": {
+                    f"p{p}": float(np.percentile(final_equities, p)) for p in percentiles
+                },
+                "max_drawdown": {
+                    f"p{p}": float(np.percentile(max_drawdowns, p)) for p in percentiles
+                },
+                "win_rate": {
+                    f"p{p}": float(np.percentile(win_rates, p)) for p in percentiles
+                },
+            },
+            "worst_case_dd": float(np.percentile(max_drawdowns, 95)),
+            "best_case_return": float(np.percentile(final_equities, 95)),
+            "worst_case_return": float(np.percentile(final_equities, 5)),
+        }
+
+
+def run_monte_carlo_analysis(
+    trades: List[Union[Trade, Any]],
+    num_simulations: int = 1000,
+) -> Dict[str, Any]:
+    """
+    Run Monte Carlo analysis on a list of trades.
+    
+    Args:
+        trades: List of Trade objects
+        num_simulations: Number of Monte Carlo iterations
+        
+    Returns:
+        Dict with Monte Carlo results including confidence intervals
+    """
+    if not trades:
+        return {
+            "error": "No trades provided",
+            "num_simulations": 0,
+        }
+    
+    simulator = MonteCarloSimulator(trades, num_simulations)
+    results = simulator.run_simulation()
+    
+    print(f"\n{'='*60}")
+    print("MONTE CARLO SIMULATION RESULTS")
+    print(f"{'='*60}")
+    print(f"Simulations: {results.get('num_simulations', 0)}")
+    print(f"Trades per simulation: {results.get('num_trades', 0)}")
+    print(f"\nReturn Distribution:")
+    print(f"  Mean Return: {results.get('mean_return', 0):+.2f}R")
+    print(f"  Std Dev: {results.get('std_return', 0):.2f}R")
+    print(f"  Best Case (95th): {results.get('best_case_return', 0):+.2f}R")
+    print(f"  Worst Case (5th): {results.get('worst_case_return', 0):+.2f}R")
+    print(f"\nDrawdown Distribution:")
+    print(f"  Mean Max DD: {results.get('mean_max_dd', 0):.2f}R")
+    print(f"  Worst Case DD (95th): {results.get('worst_case_dd', 0):.2f}R")
+    print(f"\nWin Rate Distribution:")
+    ci = results.get('confidence_intervals', {}).get('win_rate', {})
+    print(f"  Mean: {results.get('mean_win_rate', 0):.1f}%")
+    print(f"  5th-95th Range: {ci.get('p5', 0):.1f}% - {ci.get('p95', 0):.1f}%")
+    print(f"{'='*60}")
+    
+    return results
 
 
 def is_valid_trading_day(dt: datetime) -> bool:
@@ -407,6 +559,25 @@ def run_out_of_sample_test(
     print(f"  Total R: {results['total_r']:+.1f}R")
     print(f"  Sharpe-like Ratio: {results['sharpe_like']:.2f}")
     print(f"  PASSED: {'YES' if results['passed'] else 'NO'}")
+    
+    if trades and len(trades) >= 10:
+        print(f"\nRunning Monte Carlo simulation on OOS results...")
+        mc_results = run_monte_carlo_analysis(trades, num_simulations=1000)
+        results["monte_carlo"] = mc_results
+        
+        ci = mc_results.get("confidence_intervals", {}).get("final_equity", {})
+        results["mc_confidence_intervals"] = {
+            "return_5th_percentile": ci.get("p5", 0),
+            "return_25th_percentile": ci.get("p25", 0),
+            "return_median": ci.get("p50", 0),
+            "return_75th_percentile": ci.get("p75", 0),
+            "return_95th_percentile": ci.get("p95", 0),
+        }
+        
+        print(f"\nMonte Carlo Confidence Intervals (Final Equity):")
+        print(f"  5th percentile: {ci.get('p5', 0):+.2f}R")
+        print(f"  Median (50th): {ci.get('p50', 0):+.2f}R")
+        print(f"  95th percentile: {ci.get('p95', 0):+.2f}R")
     
     return results
 

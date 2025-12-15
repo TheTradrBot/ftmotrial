@@ -89,6 +89,11 @@ def load_strategy_params():
         tp3_close_pct=data.get("tp3_close_pct", 0.15),
         tp4_close_pct=data.get("tp4_close_pct", 0.20),
         tp5_close_pct=data.get("tp5_close_pct", 0.45),
+        use_atr_regime_filter=data.get("use_atr_regime_filter", True),
+        atr_min_percentile=data.get("atr_min_percentile", 60.0),
+        use_zscore_filter=data.get("use_zscore_filter", True),
+        zscore_threshold=data.get("zscore_threshold", 1.5),
+        use_pattern_filter=data.get("use_pattern_filter", True),
     )
 
 

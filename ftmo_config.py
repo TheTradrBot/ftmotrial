@@ -100,6 +100,14 @@ class FTMO200KConfig:
     max_win_streak_bonus: float = 0.20  # Cap at +20% bonus
     loss_streak_reduction_per_loss: float = 0.10  # -10% per consecutive loss
     max_loss_streak_reduction: float = 0.40  # Cap at -40% reduction
+    consecutive_loss_halt: int = 5  # Halt trading after 5 consecutive losses
+    streak_reset_after_win: bool = True  # Reset loss streak counter after a win
+    
+    # Volatility Parity Position Sizing
+    use_volatility_parity: bool = True  # Enable volatility parity adjustment
+    volatility_parity_reference_atr: float = 0.0  # Reference ATR (0 = auto-calculate from median)
+    volatility_parity_min_risk: float = 0.25  # Minimum risk % with volatility parity
+    volatility_parity_max_risk: float = 2.0  # Maximum risk % with volatility parity
     
     # Equity curve scaling
     equity_boost_threshold_pct: float = 3.0  # Boost size after 3% profit
@@ -354,12 +362,15 @@ class FTMO200KConfig:
         current_profit_pct: float = 0.0,
         daily_loss_pct: float = 0.0,
         total_dd_pct: float = 0.0,
+        current_atr: float = 0.0,
+        reference_atr: float = 0.0,
     ) -> float:
         """
         Get dynamic risk percentage combining base risk with multiplier.
         
         Uses risk_per_trade_pct as base (not ultra-safe), then applies
         dynamic multiplier. Safety adjustments are built into the multiplier.
+        Also incorporates volatility parity adjustment when enabled.
         
         Args:
             confluence_score: Trade confluence score (1-7)
@@ -368,14 +379,17 @@ class FTMO200KConfig:
             current_profit_pct: Current profit as % of starting balance
             daily_loss_pct: Today's loss as %
             total_dd_pct: Total drawdown as %
+            current_atr: Current ATR value for volatility parity
+            reference_atr: Reference ATR for normalization (0 = use config value)
             
         Returns:
-            Risk percentage to use for this trade
+            Risk percentage to use for this trade (0.0 if trading halted)
         """
-        # Use normal risk as base (not ultra-safe) for dynamic sizing
+        if loss_streak >= self.consecutive_loss_halt:
+            return 0.0
+        
         base_risk = self.risk_per_trade_pct
         
-        # Reduce base risk in emergency scenarios (approaching limits)
         if daily_loss_pct >= self.daily_loss_reduce_pct:
             base_risk = self.max_risk_conservative_pct
         elif daily_loss_pct >= self.daily_loss_warning_pct:
@@ -385,7 +399,6 @@ class FTMO200KConfig:
         elif total_dd_pct >= self.total_dd_warning_pct:
             base_risk = self.max_risk_normal_pct
         
-        # Apply dynamic multiplier
         multiplier = self.get_dynamic_lot_size_multiplier(
             confluence_score=confluence_score,
             win_streak=win_streak,
@@ -397,12 +410,45 @@ class FTMO200KConfig:
         
         dynamic_risk = base_risk * multiplier
         
-        # Hard cap at max aggressive risk * 1.5 for highest confluence/streak trades
+        if self.use_volatility_parity and current_atr > 0:
+            ref_atr = reference_atr if reference_atr > 0 else self.volatility_parity_reference_atr
+            if ref_atr > 0:
+                vol_adjustment = ref_atr / current_atr
+                dynamic_risk = dynamic_risk * vol_adjustment
+                dynamic_risk = max(self.volatility_parity_min_risk, 
+                                  min(self.volatility_parity_max_risk, dynamic_risk))
+        
         dynamic_risk = min(dynamic_risk, self.max_risk_aggressive_pct * 1.5)
-        # Floor at minimum tradeable risk
         dynamic_risk = max(dynamic_risk, 0.25)
         
         return round(dynamic_risk, 4)
+    
+    def should_halt_trading(self, loss_streak: int) -> bool:
+        """
+        Check if trading should be halted due to consecutive losses.
+        
+        Args:
+            loss_streak: Current consecutive loss count
+            
+        Returns:
+            True if trading should be halted
+        """
+        return loss_streak >= self.consecutive_loss_halt
+    
+    def get_adjusted_loss_streak(self, loss_streak: int, last_trade_won: bool) -> int:
+        """
+        Get adjusted loss streak after a trade result.
+        
+        Args:
+            loss_streak: Current consecutive loss count
+            last_trade_won: Whether the last trade was a winner
+            
+        Returns:
+            Adjusted loss streak count
+        """
+        if last_trade_won and self.streak_reset_after_win:
+            return 0
+        return loss_streak
 
 
 # Global configuration instance
