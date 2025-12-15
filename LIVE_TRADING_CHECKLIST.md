@@ -1,5 +1,15 @@
 # FTMO 200K Live Trading Checklist
 
+## Post-Fix Status
+
+All critical issues have been resolved:
+- Position sizing uses correct symbol-specific pip values for all 34 assets
+- Parameters loaded from `params/current_params.json` (no hardcoded values)
+- Pre-trade spread validation enforced
+- MT5 auto-reconnection with exponential backoff
+
+---
+
 ## Pre-Launch Verification
 
 ### 1. Environment Setup
@@ -12,13 +22,14 @@
   - `MT5_PASSWORD`: Your account password
   - `SCAN_INTERVAL_HOURS`: Set to 4 (recommended)
 
-### 2. Account Configuration Verification
-Confirm these settings in `ftmo_config.py`:
-- [ ] `account_size`: 200000.0 (FTMO 200K)
-- [ ] `risk_per_trade_pct`: 0.95 (matches backtest)
-- [ ] `min_confluence_score`: 3 (optimized setting)
-- [ ] `weekend_close_enabled`: False (Swing account)
-- [ ] `max_concurrent_trades`: 10
+### 2. Parameter Configuration Verification
+Confirm these settings in `params/current_params.json`:
+- [ ] `min_confluence`: Check value (typically 5-6)
+- [ ] `risk_per_trade_pct`: Check value (typically 0.5-1.0%)
+- [ ] `max_open_trades`: Check value (typically 3-7)
+- [ ] `transaction_costs`: Verify spread values per symbol
+
+**Important**: The live bot loads ALL tunable parameters from this JSON file at startup.
 
 ### 3. FTMO Rules Compliance
 Your bot is configured for these limits:
@@ -31,23 +42,29 @@ Your bot is configured for these limits:
 | Phase 2 Target | 5% ($10,000) | Ultra-safe mode at 4% |
 
 ### 4. Spread Limits Verification
-Maximum allowed spreads (in pips) before trade rejection:
-- Major pairs (EUR/USD, USD/JPY): 2.0-2.5 pips
+Maximum allowed spreads (from `params/current_params.json`):
+- Major pairs (EUR/USD, USD/JPY): 1.5-2.5 pips
 - Cross pairs (GBP/JPY): 3.0-5.0 pips
-- Gold (XAU/USD): 40 pips
-- Default for unlisted: 5 pips
+- Gold (XAU/USD): 35-40 pips
+- Default for unlisted: 2.5 pips
 
 ---
 
 ## Launch Day Procedure
 
-### Step 1: Pre-Market Checks (Before 5:00 AM UTC Sunday)
+### Step 1: Verify Parameters Generated
+```bash
+# Check params/current_params.json exists and has recent timestamp
+cat params/current_params.json | head -10
+```
+
+### Step 2: Pre-Market Checks (Before 5:00 AM UTC Sunday)
 1. [ ] Verify no pending orders from previous session
 2. [ ] Check `trading_days.json` for correct challenge dates
 3. [ ] Review `pending_setups.json` is empty or has valid setups
 4. [ ] Confirm challenge state in `challenge_state.json`
 
-### Step 2: Start the Bot
+### Step 3: Start the Bot
 ```bash
 # Navigate to bot directory
 cd /path/to/trading-bot
@@ -56,15 +73,15 @@ cd /path/to/trading-bot
 python main_live_bot.py
 ```
 
-### Step 3: Verify Successful Start
+### Step 4: Verify Successful Start
 Watch for these log messages:
 - [ ] "Connected: [login] @ [server]"
 - [ ] "Balance: $200,000.00" (or current balance)
 - [ ] "Mapped XX/34 symbols"
+- [ ] "Loaded parameters from params/current_params.json"
 - [ ] "Challenge Risk Manager initialized with ELITE PROTECTION"
-- [ ] Verify `challenge_state.json` shows correct phase and drawdown figures after MT5 sync
 
-### Step 4: First Scan Verification
+### Step 5: First Scan Verification
 After the first 4-hour scan completes:
 - [ ] Check `logs/tradr_live.log` for scan results
 - [ ] Verify no error messages in logs
@@ -82,7 +99,7 @@ After the first 4-hour scan completes:
 
 ### End of Day Check (9:00 PM UTC)
 - [ ] Review daily P&L in MT5
-- [ ] Check trading days count: `python -c "import json; print(json.load(open('trading_days.json'))['trading_days'])"`
+- [ ] Check trading days count
 - [ ] Verify no stuck pending orders
 - [ ] Confirm bot is still running
 
@@ -107,14 +124,15 @@ with open('trading_days.json', 'r') as f:
     print(f"Challenge End: {data.get('challenge_end_date', 'Not set')}")
 ```
 
-### Starting a New Challenge
+### Check Current Parameters
 ```python
-# When starting Phase 1, Phase 2, or resetting
-# The bot auto-starts if no challenge is active
-# To manually reset:
-from main_live_bot import LiveTradingBot
-bot = LiveTradingBot()
-bot.start_new_challenge(duration_days=30)
+# View loaded parameters
+import json
+with open('params/current_params.json', 'r') as f:
+    params = json.load(f)
+    print(f"Min Confluence: {params['min_confluence']}")
+    print(f"Risk Per Trade: {params['risk_per_trade_pct']}%")
+    print(f"Generated: {params['generated_at']}")
 ```
 
 ---
@@ -124,7 +142,7 @@ bot.start_new_challenge(duration_days=30)
 ### Automatic Risk Reduction
 | Daily Loss Level | Action Taken |
 |------------------|--------------|
-| 0-2.5% | Full risk (0.95%) |
+| 0-2.5% | Full risk (as per params) |
 | 2.5-3.5% | Reduced risk (0.5%) |
 | 3.5-4.2% | Ultra-safe (0.25%) |
 | >4.2% | HALT - No new trades |
@@ -144,7 +162,15 @@ bot.start_new_challenge(duration_days=30)
 1. Check the log file: `logs/tradr_live.log`
 2. Check for Python errors or MT5 connection issues
 3. Restart the bot: `python main_live_bot.py`
-4. Verify all pending orders are still valid
+4. The bot will automatically reconnect with exponential backoff
+5. Verify all pending orders are still valid
+
+### If MT5 Connection Lost
+The bot now features automatic reconnection:
+- Exponential backoff: 1s, 2s, 4s, 8s, ... up to 5 minutes
+- Heartbeat monitoring detects stale connections
+- Automatic reconnection attempts continue until successful
+- Partial fill handling for interrupted orders
 
 ### If Approaching Daily Loss Limit
 The bot automatically:
@@ -164,20 +190,14 @@ At 7% total drawdown:
 3. Consider reducing exposure manually
 4. Review strategy performance
 
-### Manual Order Cancellation
-```bash
-# Cancel all pending orders via MT5 terminal
-# Or use Python:
-python -c "from tradr.mt5.client import MT5Client; c = MT5Client(); c.connect(); c.cancel_all_pending_orders(); c.disconnect()"
-```
-
 ---
 
 ## Key Files Reference
 
 | File | Purpose |
 |------|---------|
-| `main_live_bot.py` | Main trading bot executable |
+| `main_live_bot.py` | Main trading bot (loads params from JSON) |
+| `params/current_params.json` | **Single source of truth** for parameters |
 | `ftmo_config.py` | FTMO-specific configuration |
 | `strategy_core.py` | Core strategy logic (same as backtest) |
 | `pending_setups.json` | Active pending trade setups |
@@ -194,36 +214,40 @@ python -c "from tradr.mt5.client import MT5Client; c = MT5Client(); c.connect();
 - **News trading**: ALLOWED
 - **Weekend close**: DISABLED
 
-### Strategy Settings (Optimized)
-| Parameter | Value |
-|-----------|-------|
-| Risk per trade | 0.95% |
-| Min confluence | 3/7 |
-| Min quality factors | 1 |
-| Max concurrent trades | 10 |
+### Strategy Settings (From params/current_params.json)
+| Parameter | Typical Value |
+|-----------|---------------|
+| Risk per trade | 0.5-1.0% |
+| Min confluence | 5-6/7 |
+| Min quality factors | 3 |
+| Max concurrent trades | 3-7 |
 | Scan interval | 4 hours |
 | Pending order expiry | 24 hours |
 
 ### Live Market Safeguards
-| Safeguard | Setting |
-|-----------|---------|
-| Slippage buffer | 2 pips |
-| Spread validation | Enabled |
+| Safeguard | Status |
+|-----------|--------|
+| Slippage buffer | Enabled (from params) |
+| Spread validation | Enabled (pre-trade) |
 | Symbol mapping | OANDA -> FTMO |
+| Position sizing | Symbol-specific pip values |
+| MT5 reconnection | Exponential backoff |
 
 ---
 
 ## Final Pre-Live Verification
 
 Before going live, verify:
-1. [ ] Tested on FTMO Demo account for at least 1 week
-2. [ ] All symbol mappings working correctly
-3. [ ] Orders execute at expected prices
-4. [ ] Partial closes and trailing stops working
-5. [ ] Trading days tracking records correctly
-6. [ ] Log files generating properly
-7. [ ] Emergency procedures understood
-8. [ ] FTMO rules memorized
+1. [ ] Generated fresh parameters: `python ftmo_challenge_analyzer.py`
+2. [ ] Reviewed `params/current_params.json` settings
+3. [ ] Tested on FTMO Demo account for at least 1 week
+4. [ ] All symbol mappings working correctly
+5. [ ] Orders execute at expected prices
+6. [ ] Partial closes and trailing stops working
+7. [ ] Trading days tracking records correctly
+8. [ ] Log files generating properly
+9. [ ] Emergency procedures understood
+10. [ ] FTMO rules memorized
 
 ---
 
@@ -244,6 +268,11 @@ positions = client.get_my_positions()
 for p in positions:
     print(f"{p.symbol}: {p.volume} lots, P/L: {p.profit}")
 client.disconnect()
+```
+
+### View Current Parameters
+```bash
+cat params/current_params.json
 ```
 
 ### View Pending Setups
@@ -285,4 +314,5 @@ To ensure the bot restarts after VM reboots:
 **Good luck with your FTMO challenge!**
 
 *Bot configured for $200K Swing Account with optimized settings.*
+*All parameters loaded from `params/current_params.json` - the single source of truth.*
 *Remember: The bot is designed to protect your account first, profits second.*

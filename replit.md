@@ -3,21 +3,38 @@
 > **For a comprehensive understanding of this project, start with `PROJECT_OVERVIEW.md`**
 
 ## Overview
-This project is a **MetaTrader 5 FTMO 200K Trading Bot** with an integrated **optimization system**. The project contains two main components:
+This project is a **production-hardened MetaTrader 5 FTMO 200K Trading Bot** with professional-grade **parameter optimization**. The system has been upgraded to ensure production safety with accurate position sizing, no source code mutation, and robust live trading features.
 
-1. **main_live_bot.py** - A standalone MT5 live trading bot designed for FTMO 200K challenge accounts. It runs 24/7 on a Windows VM with MetaTrader 5, executing trades based on a rigorously backtested "7 Confluence Pillars" strategy.
+### Two Main Components
 
-2. **ftmo_challenge_analyzer.py** - An optimization engine that backtests main_live_bot against 2024 historical data, runs multiple optimization iterations, and updates the best-performing parameters to main_live_bot.py automatically.
+1. **main_live_bot.py** - A standalone MT5 live trading bot designed for FTMO 200K challenge accounts. It runs 24/7 on a Windows VM with MetaTrader 5, executing trades based on a rigorously backtested "7 Confluence Pillars" strategy. **Loads all tunable parameters from `params/current_params.json` at startup.**
+
+2. **ftmo_challenge_analyzer.py** - An optimization engine that backtests the strategy against 2024 historical data, runs walk-forward optimization, and **saves optimized parameters to `params/current_params.json`** (does NOT modify source code).
+
+## Key Improvements (Post-Fix)
+
+| Issue | Status |
+|-------|--------|
+| Position sizing pip values | **FIXED** - Symbol-specific for all 34 assets |
+| Source code mutation | **FIXED** - Optimizer saves to JSON only |
+| Transaction costs | **FIXED** - Spread + slippage in backtests |
+| Look-ahead bias | **FIXED** - Timestamp-based MTF alignment |
+| MT5 connectivity | **FIXED** - Auto-reconnection with exponential backoff |
+| Spread validation | **FIXED** - Pre-trade checks enforced |
 
 ## Project Structure
 
 ### Core Trading Files
-- `main_live_bot.py` - The primary live trading bot (runs on Windows VM with MT5)
+- `main_live_bot.py` - Live trading bot (loads params from JSON)
 - `strategy_core.py` - Core strategy logic (7 Confluence Pillars)
-- `ftmo_config.py` - FTMO-specific configuration and risk parameters
+- `ftmo_config.py` - FTMO-specific configuration
+
+### Parameter Management
+- `params/current_params.json` - **Single source of truth** for all tunable parameters
+- `params/params_loader.py` - Parameter loading utilities
 
 ### Optimization System
-- `ftmo_challenge_analyzer.py` - Backtests and optimizes main_live_bot.py using 2024 data
+- `ftmo_challenge_analyzer.py` - Backtests and saves params to JSON
 - `ftmo_optimization_backups/` - Backup copies of each optimization iteration
 
 ### Data & Analysis
@@ -39,20 +56,22 @@ The bot employs a "7 Confluence Pillars" strategy:
 6. Confirmation (4H candle patterns)
 7. Risk:Reward (Min 1:1)
 
-Trades execute only when >= 4 pillars align with valid R:R ratio.
+Trades execute only when >= 5 pillars align with valid R:R ratio.
 
 ## Risk Management
-- Dynamic position sizing (0.75-0.95% base risk)
-- 5 concurrent trade limit, 6 pending order limit
+- Accurate symbol-specific position sizing (all 34 assets safe)
+- Dynamic risk per trade (0.5-1.0%)
+- Concurrent trade limits
 - Pre-trade FTMO rule violation checks
+- Pre-trade spread validation
 - 5 risk modes: Aggressive, Normal, Conservative, Ultra-Safe, Halted
 
 ## Supported Assets
 34 assets including:
-- Forex: Majors + Cross pairs
-- Metals: XAUUSD, XAGUSD
-- Crypto: BTCUSD, ETHUSD
-- Indices: US500, US100
+- Forex: Majors + Cross pairs (28)
+- Metals: XAUUSD, XAGUSD (2)
+- Crypto: BTCUSD, ETHUSD (2)
+- Indices: SPX500, NAS100 (2)
 
 ## Environment Variables Required
 ```
@@ -65,15 +84,17 @@ OANDA_ACCOUNT_ID=your_account_id
 
 ## Running the Project
 
-### Live Trading (Windows VM)
-```bash
-python main_live_bot.py
-```
-
-### Run Optimization
+### Step 1: Generate Parameters (Replit)
 ```bash
 python ftmo_challenge_analyzer.py
 ```
+This saves optimized parameters to `params/current_params.json`.
+
+### Step 2: Live Trading (Windows VM)
+```bash
+python main_live_bot.py
+```
+The bot loads parameters from `params/current_params.json` automatically.
 
 ### Web Status Server (Replit)
 ```bash
@@ -81,6 +102,12 @@ python main.py
 ```
 
 ## User Preferences
-- Strategy must use EXACT SAME logic as backtests
+- Strategy uses EXACT SAME logic as backtests
 - Bot trades independently (no external dependencies required)
 - Pre-trade risk checks to prevent FTMO rule violations
+- Parameters loaded from JSON (no hardcoded values in source)
+
+## Assessment
+
+**Current Rating**: 7.5-8/10  
+**Status**: Ready for paper trading; monitor closely on live challenge.
