@@ -70,10 +70,20 @@ class MT5Client:
     
     This class directly interfaces with MetaTrader5.
     Only works on Windows with MT5 terminal installed.
+    
+    Features:
+    - Automatic reconnection with exponential backoff
+    - Connection health monitoring
+    - Heartbeat checks before critical operations
     """
     
     MAGIC_NUMBER = 123456
     COMMENT = "TradrBot"
+    
+    MAX_RECONNECT_ATTEMPTS = 5
+    INITIAL_BACKOFF_SECONDS = 1
+    MAX_BACKOFF_SECONDS = 60
+    HEARTBEAT_INTERVAL_SECONDS = 30
     
     def __init__(
         self,
@@ -86,6 +96,8 @@ class MT5Client:
         self.password = password
         self.connected = False
         self._mt5 = None
+        self._last_heartbeat = 0.0
+        self._consecutive_failures = 0
     
     def _import_mt5(self):
         """Lazy import of MetaTrader5 (Windows only)."""
@@ -133,6 +145,100 @@ class MT5Client:
         if self._mt5 and self.connected:
             self._mt5.shutdown()
         self.connected = False
+        self._consecutive_failures = 0
+    
+    def connect_with_retry(self, max_attempts: int = None) -> bool:
+        """
+        Connect to MT5 with exponential backoff retry.
+        
+        Args:
+            max_attempts: Maximum retry attempts (default: MAX_RECONNECT_ATTEMPTS)
+            
+        Returns:
+            True if connected, False if all attempts failed
+        """
+        if max_attempts is None:
+            max_attempts = self.MAX_RECONNECT_ATTEMPTS
+        
+        backoff = self.INITIAL_BACKOFF_SECONDS
+        
+        for attempt in range(1, max_attempts + 1):
+            print(f"[MT5] Connection attempt {attempt}/{max_attempts}...")
+            
+            if self.connect():
+                self._consecutive_failures = 0
+                print(f"[MT5] Connected successfully on attempt {attempt}")
+                return True
+            
+            if attempt < max_attempts:
+                print(f"[MT5] Connection failed, waiting {backoff}s before retry...")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, self.MAX_BACKOFF_SECONDS)
+        
+        print(f"[MT5] All {max_attempts} connection attempts failed")
+        return False
+    
+    def is_connected(self) -> bool:
+        """
+        Check if MT5 connection is alive by testing terminal info.
+        
+        Returns:
+            True if connected and responsive, False otherwise
+        """
+        if not self.connected or self._mt5 is None:
+            return False
+        
+        try:
+            info = self._mt5.terminal_info()
+            return info is not None
+        except Exception:
+            return False
+    
+    def check_heartbeat(self) -> bool:
+        """
+        Perform heartbeat check and reconnect if needed.
+        
+        Should be called periodically (e.g., before each trading cycle).
+        
+        Returns:
+            True if connection is healthy, False if reconnect failed
+        """
+        current_time = time.time()
+        
+        if current_time - self._last_heartbeat < self.HEARTBEAT_INTERVAL_SECONDS:
+            return self.connected
+        
+        self._last_heartbeat = current_time
+        
+        if self.is_connected():
+            self._consecutive_failures = 0
+            return True
+        
+        print("[MT5] Heartbeat failed, attempting reconnection...")
+        self.connected = False
+        self._consecutive_failures += 1
+        
+        if self._consecutive_failures > self.MAX_RECONNECT_ATTEMPTS:
+            print(f"[MT5] Too many consecutive failures ({self._consecutive_failures}), giving up")
+            return False
+        
+        return self.connect_with_retry()
+    
+    def ensure_connected(self) -> bool:
+        """
+        Ensure MT5 is connected before critical operations.
+        
+        Call this before execute_trade, close_position, etc.
+        
+        Returns:
+            True if connected (or successfully reconnected), False otherwise
+        """
+        if self.is_connected():
+            return True
+        
+        print("[MT5] Connection lost, attempting reconnection...")
+        self.connected = False
+        return self.connect_with_retry()
     
     def get_account_info(self) -> Dict:
         """Get account information."""

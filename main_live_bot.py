@@ -778,6 +778,23 @@ class LiveTradingBot:
         quality_factors = setup["quality_factors"]
         entry_distance_r = setup.get("entry_distance_r", 0)
         
+        if FTMO_CONFIG.min_spread_check:
+            tick = self.mt5.get_tick(broker_symbol)
+            if tick is not None:
+                pip_size = get_pip_size(symbol)
+                if pip_size <= 0:
+                    log.warning(f"[{symbol}] Cannot determine pip size for spread check - using default 5 pip max")
+                    pip_size = 0.0001
+                
+                current_spread_pips = tick.spread / pip_size
+                
+                if not FTMO_CONFIG.is_spread_acceptable(symbol, current_spread_pips):
+                    max_spread = FTMO_CONFIG.get_max_spread_pips(symbol)
+                    log.warning(f"[{symbol}] Spread too wide: {current_spread_pips:.1f} pips > {max_spread:.1f} pips max - skipping trade")
+                    return False
+                
+                log.info(f"[{symbol}] Spread check passed: {current_spread_pips:.1f} pips")
+        
         if symbol in self.pending_setups:
             existing = self.pending_setups[symbol]
             if existing.status == "pending":

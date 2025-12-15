@@ -15,23 +15,62 @@ from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Any
 
 
-def _is_weekend(candle: Dict) -> bool:
-    """Check if a candle falls on a weekend (Saturday=5, Sunday=6)."""
+def _get_candle_datetime(candle: Dict) -> Optional[datetime]:
+    """Extract datetime from candle dictionary."""
     time_val = candle.get("time") or candle.get("timestamp") or candle.get("date")
     if time_val is None:
-        return False
+        return None
     
     try:
         if isinstance(time_val, str):
-            dt = datetime.fromisoformat(time_val.replace("Z", "+00:00"))
+            return datetime.fromisoformat(time_val.replace("Z", "+00:00"))
         elif isinstance(time_val, datetime):
-            dt = time_val
+            return time_val
         else:
-            return False
-        
-        return dt.weekday() >= 5  # 5=Saturday, 6=Sunday
+            return None
     except (ValueError, TypeError):
+        return None
+
+
+def _slice_htf_by_timestamp(
+    htf_candles: Optional[List[Dict]],
+    reference_dt: datetime
+) -> Optional[List[Dict]]:
+    """
+    Slice higher-timeframe candles to only include those with timestamp <= reference.
+    
+    This prevents look-ahead bias by ensuring we only use HTF data
+    that would have been available at the time of the reference candle.
+    
+    Args:
+        htf_candles: List of higher-timeframe candles (weekly, monthly, etc)
+        reference_dt: The reference datetime (current daily candle time)
+    
+    Returns:
+        Sliced list of candles or None if input is None/empty
+    """
+    if not htf_candles:
+        return None
+    
+    result = []
+    for candle in htf_candles:
+        candle_dt = _get_candle_datetime(candle)
+        if candle_dt is None:
+            result.append(candle)
+        elif candle_dt <= reference_dt:
+            result.append(candle)
+        else:
+            break
+    
+    return result if result else None
+
+
+def _is_weekend(candle: Dict) -> bool:
+    """Check if a candle falls on a weekend (Saturday=5, Sunday=6)."""
+    dt = _get_candle_datetime(candle)
+    if dt is None:
         return False
+    return dt.weekday() >= 5  # 5=Saturday, 6=Sunday
 
 
 @dataclass
@@ -1007,10 +1046,17 @@ def generate_signals(
     for i in range(50, len(candles)):
         try:
             daily_slice = candles[:i+1]
+            current_candle = candles[i]
+            current_dt = _get_candle_datetime(current_candle)
             
-            weekly_slice = weekly_candles[:i//5+1] if weekly_candles else None
-            monthly_slice = monthly_candles[:i//20+1] if monthly_candles else None
-            h4_slice = h4_candles[:i*6+1] if h4_candles else None
+            if current_dt is not None:
+                weekly_slice = _slice_htf_by_timestamp(weekly_candles, current_dt)
+                monthly_slice = _slice_htf_by_timestamp(monthly_candles, current_dt)
+                h4_slice = _slice_htf_by_timestamp(h4_candles, current_dt)
+            else:
+                weekly_slice = weekly_candles[:i//5+1] if weekly_candles else None
+                monthly_slice = monthly_candles[:i//20+1] if monthly_candles else None
+                h4_slice = h4_candles[:i*6+1] if h4_candles else None
             
             mn_trend = _infer_trend(monthly_slice) if monthly_slice else _infer_trend(daily_slice[-60:])
             wk_trend = _infer_trend(weekly_slice) if weekly_slice else _infer_trend(daily_slice[-20:])
