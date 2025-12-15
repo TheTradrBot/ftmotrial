@@ -12,3 +12,6 @@ flask
 flask-cors
 python-dotenv
 flask
+flask
+flask-cors
+python-dotenv
