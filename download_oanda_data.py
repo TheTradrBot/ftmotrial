@@ -1,7 +1,8 @@
 """
 OANDA Historical Data Downloader
 
-Downloads OHLCV data for all 34 trading assets from OANDA for 2023-2025.
+Downloads OHLCV data for all 34 trading assets from OANDA for 2003-2025.
+Derives monthly (MN) data from daily candles since OANDA API is unreliable for monthly.
 Skips already downloaded files. Run in Shell tab for long downloads.
 
 Usage: python download_oanda_data.py
@@ -28,33 +29,73 @@ ASSETS = [
     "SPX500_USD", "NAS100_USD",
 ]
 
-TIMEFRAMES = ["D", "H4", "W"]  # Removed M (monthly) - OANDA API often hangs/fails on monthly
+TIMEFRAMES = ["D", "H4", "W"]
 TF_MAP = {"D": "D1", "H4": "H4", "W": "W1"}
+
+START_YEAR = 2003
+END_YEAR = 2025
+
+
+def derive_monthly_from_daily(symbol: str) -> bool:
+    """
+    Derive monthly OHLCV data from daily data.
+    Returns True if successful, False otherwise.
+    """
+    daily_path = OUTPUT_DIR / f"{symbol}_D1_{START_YEAR}_{END_YEAR}.csv"
+    monthly_path = OUTPUT_DIR / f"{symbol}_MN_{START_YEAR}_{END_YEAR}.csv"
+    
+    if monthly_path.exists():
+        print(f"  MN: Already exists, skipping")
+        return True
+    
+    if not daily_path.exists():
+        print(f"  MN: Cannot derive - daily data not found")
+        return False
+    
+    try:
+        df = pd.read_csv(daily_path, index_col=0, parse_dates=True)
+        
+        monthly = df.resample('ME').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+        
+        monthly.to_csv(monthly_path)
+        print(f"  MN: Derived {len(monthly)} monthly candles from daily data")
+        return True
+    except Exception as e:
+        print(f"  MN: Error deriving monthly - {e}")
+        return False
+
 
 def main():
     print("=" * 70)
     print("OANDA HISTORICAL DATA DOWNLOADER")
     print("=" * 70)
     print(f"Assets: {len(ASSETS)}")
-    print(f"Date range: 2023-01-01 to 2025-12-16")
-    print(f"Timeframes: D1, H4, W1 (Monthly excluded - OANDA API unreliable)")
+    print(f"Date range: {START_YEAR}-01-01 to {END_YEAR}-12-31")
+    print(f"Timeframes: D1, H4, W1 (Monthly derived from Daily)")
     print(f"Skipping already downloaded files")
     print("=" * 70)
 
-    start_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
-    end_date = datetime(2025, 12, 16, tzinfo=timezone.utc)
+    start_date = datetime(START_YEAR, 1, 1, tzinfo=timezone.utc)
+    end_date = datetime(END_YEAR, 12, 31, tzinfo=timezone.utc)
 
     successful = 0
     skipped = 0
     failed = 0
+    monthly_derived = 0
 
     for i, asset in enumerate(ASSETS, 1):
         print(f"\n[{i}/{len(ASSETS)}] {asset}")
+        symbol = asset.replace("_", "")
         
         for tf in TIMEFRAMES:
-            symbol = asset.replace("_", "")
             tf_name = TF_MAP[tf]
-            output_path = OUTPUT_DIR / f"{symbol}_{tf_name}_2023_2025.csv"
+            output_path = OUTPUT_DIR / f"{symbol}_{tf_name}_{START_YEAR}_{END_YEAR}.csv"
             
             if output_path.exists():
                 print(f"  {tf_name}: Already exists, skipping")
@@ -83,12 +124,17 @@ def main():
             except Exception as e:
                 print(f"  {tf_name}: Error - {e}")
                 failed += 1
+        
+        if derive_monthly_from_daily(symbol):
+            monthly_derived += 1
 
     print("\n" + "=" * 70)
     print("DOWNLOAD COMPLETE")
-    print(f"Successful: {successful} files")
+    print("=" * 70)
+    print(f"Successful downloads: {successful} files")
     print(f"Skipped (already exist): {skipped} files")
     print(f"Failed: {failed} files")
+    print(f"Monthly derived from daily: {monthly_derived} files")
     print("=" * 70)
 
 if __name__ == "__main__":
