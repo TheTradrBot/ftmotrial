@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Ultimate FTMO Challenge Performance Analyzer - 2024 Historical Data
+Production-Ready, Resumable Optimizer with December Holiday Protection
 
 This module provides a comprehensive backtesting and self-optimizing system that:
 1. Backtests main_live_bot.py using 2024 historical data
@@ -10,8 +11,17 @@ This module provides a comprehensive backtesting and self-optimizing system that
 5. Generates detailed CSV reports with all trade details
 6. Self-optimizes by saving parameters to params/current_params.json (no source code mutation)
 7. Target: Minimum 14 challenges passed, Maximum 2 failed
+8. DECEMBER FILTER: Skips new entries Dec 10-31 for holiday risk management
+9. RESUMABLE: Uses Optuna SQLite storage for crash-resistant optimization
+10. STATUS MODE: Check progress anytime with --status flag
+
+Usage:
+  python ftmo_challenge_analyzer.py              # Run/resume optimization
+  python ftmo_challenge_analyzer.py --status     # Check progress without running
+  python ftmo_challenge_analyzer.py --trials 100 # Set number of trials
 """
 
+import argparse
 import json
 import csv
 import os
@@ -46,6 +56,116 @@ from params.params_loader import save_optimized_params
 
 OUTPUT_DIR = Path("ftmo_analysis_output")
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+# Optimization storage and progress files
+OPTUNA_DB_PATH = "sqlite:///optuna_study.db"
+OPTUNA_STUDY_NAME = "ftmo_2025_study"
+PROGRESS_LOG_FILE = "ftmo_optimization_progress.txt"
+
+# =============================================================================
+# DECEMBER HOLIDAY FILTER
+# =============================================================================
+# Skip NEW trade entries from December 10-31 due to low liquidity and
+# unpredictable holiday market behavior. Existing trades can manage/exit normally.
+DECEMBER_HOLIDAY_START_DAY = 10
+DECEMBER_HOLIDAY_END_DAY = 31
+
+
+def is_december_holiday_period(dt) -> bool:
+    """
+    Check if date falls within December 10-31 holiday period.
+    During this period, NEW entries should be skipped for risk management.
+    
+    Args:
+        dt: datetime object or ISO format string
+        
+    Returns:
+        True if date is December 10-31
+    """
+    if dt is None:
+        return False
+    if isinstance(dt, str):
+        try:
+            dt_str: str = dt
+            dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        except:
+            return False
+    return dt.month == 12 and DECEMBER_HOLIDAY_START_DAY <= dt.day <= DECEMBER_HOLIDAY_END_DAY
+
+
+def log_optimization_progress(trial_num: int, value: float, best_value: float, best_params: Dict):
+    """
+    Append optimization progress to log file for tracking during long runs.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = (
+        f"[{timestamp}] Trial #{trial_num}: value={value:.0f}, "
+        f"best_value={best_value:.0f}, "
+        f"best_params={json.dumps({k: round(v, 3) if isinstance(v, float) else v for k, v in best_params.items()})}\n"
+    )
+    with open(PROGRESS_LOG_FILE, 'a') as f:
+        f.write(log_entry)
+
+
+def show_optimization_status():
+    """
+    Display current optimization status without running new trials.
+    Reads from Optuna DB and progress log.
+    """
+    import optuna
+    
+    print("\n" + "=" * 60)
+    print("FTMO OPTIMIZATION STATUS CHECK")
+    print("=" * 60)
+    
+    # Check if study exists
+    db_file = "optuna_study.db"
+    if not os.path.exists(db_file):
+        print("\nNo optimization study found.")
+        print("Run 'python ftmo_challenge_analyzer.py' to start optimization.")
+        return
+    
+    try:
+        study = optuna.load_study(
+            study_name=OPTUNA_STUDY_NAME,
+            storage=OPTUNA_DB_PATH
+        )
+        
+        print(f"\nStudy Name: {OPTUNA_STUDY_NAME}")
+        print(f"Completed Trials: {len(study.trials)}")
+        
+        if study.best_trial:
+            print(f"\nBest Value: {study.best_value:.0f}")
+            print(f"Best Parameters:")
+            for k, v in sorted(study.best_params.items()):
+                print(f"  {k}: {v}")
+            
+            best_trial = study.best_trial
+            if best_trial.datetime_complete:
+                print(f"\nLast Update: {best_trial.datetime_complete.strftime('%Y-%m-%d %H:%M:%S')}")
+        else:
+            print("\nNo completed trials yet.")
+        
+    except Exception as e:
+        print(f"\nError loading study: {e}")
+        return
+    
+    # Show last 10 lines from progress log
+    if os.path.exists(PROGRESS_LOG_FILE):
+        print(f"\n{'='*60}")
+        print("RECENT PROGRESS (last 10 entries):")
+        print("=" * 60)
+        with open(PROGRESS_LOG_FILE, 'r') as f:
+            lines = f.readlines()
+            for line in lines[-10:]:
+                print(line.rstrip())
+    else:
+        print("\nNo progress log found yet.")
+    
+    print(f"\n{'='*60}")
+    print("To resume optimization: python ftmo_challenge_analyzer.py")
+    print("=" * 60)
+
 
 # =============================================================================
 # WALK-FORWARD OPTIMIZATION DATE RANGES
@@ -2113,22 +2233,49 @@ class OptunaOptimizer:
     def run_optimization(self, n_trials: int = 5) -> Dict:
         """
         Run Optuna optimization on TRAINING data only (Jan-Sep 2024).
-        Default n_trials=5 for quick testing.
+        
+        RESUMABLE: Uses SQLite storage so optimization can be interrupted and resumed.
+        Default n_trials=5 for testing; use 100-500 for full runs.
+        Trials are ADDED to existing study, so re-running continues from where you left off.
         """
         import optuna
         optuna.logging.set_verbosity(optuna.logging.WARNING)
         
         print(f"\n{'='*60}")
-        print(f"OPTUNA OPTIMIZATION - {n_trials} trials")
+        print(f"OPTUNA OPTIMIZATION - Adding {n_trials} trials")
         print(f"TRAINING PERIOD ONLY: Jan 1 - Sep 30, 2024")
+        print(f"Storage: {OPTUNA_DB_PATH} (resumable)")
         print(f"{'='*60}")
         
+        # Create study with persistent SQLite storage - load_if_exists=True for resumability
         study = optuna.create_study(
             direction='maximize',
-            study_name='ftmo_training_optimization',
+            study_name=OPTUNA_STUDY_NAME,
+            storage=OPTUNA_DB_PATH,
+            load_if_exists=True,
             sampler=optuna.samplers.TPESampler(seed=42)
         )
-        study.optimize(self._objective, n_trials=n_trials, show_progress_bar=True)
+        
+        existing_trials = len(study.trials)
+        if existing_trials > 0:
+            print(f"Resuming from existing study with {existing_trials} completed trials")
+            print(f"Current best value: {study.best_value:.0f}")
+        
+        # Custom callback to log progress after each trial
+        def progress_callback(study, trial):
+            log_optimization_progress(
+                trial_num=trial.number,
+                value=trial.value if trial.value is not None else 0,
+                best_value=study.best_value if study.best_trial else 0,
+                best_params=study.best_params if study.best_trial else {}
+            )
+        
+        study.optimize(
+            self._objective, 
+            n_trials=n_trials, 
+            show_progress_bar=True,
+            callbacks=[progress_callback]
+        )
         
         self.best_params = study.best_params
         self.best_score = study.best_value
@@ -2136,6 +2283,7 @@ class OptunaOptimizer:
         print(f"\n{'='*60}")
         print(f"OPTIMIZATION COMPLETE")
         print(f"{'='*60}")
+        print(f"Total Trials: {len(study.trials)}")
         print(f"Best Score: {self.best_score:.0f}")
         print(f"Best Parameters:")
         for k, v in sorted(self.best_params.items()):
@@ -2160,10 +2308,13 @@ class OptunaOptimizer:
         except Exception as e:
             print(f"Failed to save params: {e}")
         
+        print(f"\nOptimization resumable — re-run to continue. Use --status to check progress.")
+        
         return {
             'best_params': self.best_params,
             'best_score': self.best_score,
             'n_trials': n_trials,
+            'total_trials': len(study.trials),
         }
     
     def train_ml_model(self, trades: List[Trade]) -> bool:
@@ -2501,10 +2652,15 @@ def run_full_period_backtest(
     rsi_period: int = 14,
     use_mean_reversion_filter: bool = True,
     use_rsi_divergence_filter: bool = True,
+    apply_december_filter: bool = True,
 ) -> List[Trade]:
     """
     Run backtest for the full Jan-Dec 2024 period.
     Uses lower confluence threshold to generate more trades.
+    
+    DECEMBER FILTER: When apply_december_filter=True, NEW entries during
+    December 10-31 are skipped for holiday risk management. Existing trades
+    can still manage/exit normally during this period.
     """
     if assets is None:
         assets = FOREX_PAIRS + METALS + INDICES + CRYPTO_ASSETS
@@ -2599,7 +2755,9 @@ def run_full_period_backtest(
             )
             
             # Filter trades to only those within the target date range
+            # Also apply December holiday filter if enabled
             date_filtered_trades = []
+            december_filtered_count = 0
             for trade in trades:
                 trade_dt = trade.entry_date
                 if isinstance(trade_dt, str):
@@ -2610,8 +2768,14 @@ def run_full_period_backtest(
                 if hasattr(trade_dt, 'replace'):
                     trade_dt = trade_dt.replace(tzinfo=None)
                 if start_naive <= trade_dt <= end_naive:
+                    # Apply December holiday filter (Dec 10-31) - skip NEW entries
+                    if apply_december_filter and is_december_holiday_period(trade_dt):
+                        december_filtered_count += 1
+                        continue
                     date_filtered_trades.append(trade)
             trades = date_filtered_trades
+            if december_filtered_count > 0:
+                print(f"(Dec filter: {december_filtered_count} skipped)", end=" ")
             
             validated_trades = []
             for trade in trades:
@@ -2819,26 +2983,60 @@ def print_period_results(trades: List, period_name: str, start_date: datetime, e
 
 def main():
     """
-    Professional FTMO Optimization Workflow:
+    Professional FTMO Optimization Workflow with CLI support:
     
+    Usage:
+      python ftmo_challenge_analyzer.py              # Run/resume optimization (5 trials default)
+      python ftmo_challenge_analyzer.py --status     # Check progress without running
+      python ftmo_challenge_analyzer.py --trials 100 # Run 100 trials (adds to existing)
+    
+    Workflow:
     1. TRAINING: Optuna optimization on Jan-Sep 2024
-    2. VALIDATION: Test best params on Oct-Dec 2024
-    3. FULL YEAR: Final backtest with ML disabled
+    2. VALIDATION: Test best params on Oct-Dec 2024 (with December filter)
+    3. FULL YEAR: Final backtest with ML disabled + December filter
     4. Export CSV, Monte Carlo, quarterly breakdown
     5. Train ML model (optional)
     6. Update documentation
+    
+    DECEMBER FILTER: Dec 10-31 filtered for holiday risk management
+    RESUMABLE: Uses SQLite storage - re-run anytime to continue
     """
+    parser = argparse.ArgumentParser(
+        description="FTMO Professional Optimization System - Resumable & December-Protected"
+    )
+    parser.add_argument(
+        "--status", 
+        action="store_true",
+        help="Check optimization progress without running new trials"
+    )
+    parser.add_argument(
+        "--trials", 
+        type=int, 
+        default=5,
+        help="Number of optimization trials to run (default: 5, adds to existing trials)"
+    )
+    args = parser.parse_args()
+    
+    # Status mode: Show progress and exit
+    if args.status:
+        show_optimization_status()
+        return
+    
+    n_trials = args.trials
+    
     print(f"\n{'='*80}")
     print("FTMO PROFESSIONAL OPTIMIZATION SYSTEM")
     print(f"{'='*80}")
     print(f"\nData Partitioning:")
     print(f"  TRAINING:    Jan 1, 2024 - Sep 30, 2024 (in-sample)")
     print(f"  VALIDATION:  Oct 1, 2024 - Dec 31, 2024 (out-of-sample)")
-    print(f"  FINAL:       Full year 2024")
+    print(f"  FINAL:       Full year 2024 (with December 10-31 filtered)")
+    print(f"\nDecember Holiday Filter: Dec 10-31 NEW entries skipped")
+    print(f"Resumable: Study stored in {OPTUNA_DB_PATH}")
     print(f"{'='*80}\n")
     
     optimizer = OptunaOptimizer(FTMO_CONFIG)
-    results = optimizer.run_optimization(n_trials=5)
+    results = optimizer.run_optimization(n_trials=n_trials)
     
     best_params = results['best_params']
     
@@ -2956,17 +3154,23 @@ def main():
     print("OPTIMIZATION COMPLETE")
     print(f"{'='*80}")
     print(f"\nBest Score: {results['best_score']:.2f}")
-    print(f"Trials Run: {results['n_trials']}")
+    print(f"Trials Run This Session: {results['n_trials']}")
+    print(f"Total Trials in Study: {results.get('total_trials', results['n_trials'])}")
+    print(f"\nDecember 10-31 filtered for holiday risk management")
     print(f"\nFiles Created:")
     print(f"  - params/current_params.json (optimized parameters)")
     print(f"  - ftmo_analysis_output/all_trades_2024_full.csv ({len(full_year_trades) if full_year_trades else 0} trades)")
     print(f"  - models/best_rf.joblib (ML model)")
+    print(f"  - optuna_study.db (resumable optimization state)")
+    print(f"  - ftmo_optimization_progress.txt (progress log)")
+    print(f"\nOptimization resumable — re-run to continue. Use --status to check progress.")
     print(f"\nReady for live trading with main_live_bot.py")
     
     return {
         'best_params': best_params,
         'best_score': results['best_score'],
         'n_trials': results['n_trials'],
+        'total_trials': results.get('total_trials', results['n_trials']),
         'training': training_results,
         'validation': validation_results,
         'full_year': full_year_results,

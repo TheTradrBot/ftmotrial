@@ -161,9 +161,48 @@ Private - For personal use only.
 
 The optimizer uses professional quant best practices:
 
-- TRAINING PERIOD: January 1, 2024 – September 30, 2024 (in-sample optimization)
-- VALIDATION PERIOD: October 1, 2024 – December 31, 2024 (out-of-sample test)
-- FINAL BACKTEST: Full year 2024 with best parameters
+- **TRAINING PERIOD**: January 1, 2024 – September 30, 2024 (in-sample optimization)
+- **VALIDATION PERIOD**: October 1, 2024 – December 31, 2024 (out-of-sample test)
+- **FINAL BACKTEST**: Full year 2024 with best parameters
+
+### December Holiday Filter
+
+**NEW**: The optimizer skips NEW trade entries during December 10-31 for holiday risk management:
+- Low liquidity during holiday period increases slippage risk
+- Unpredictable market behavior around Christmas/New Year
+- Existing trades can still manage/exit normally during this period
+- Final reports note "December 10-31 filtered for holiday risk management"
+
+### Resumable Optimization
+
+The optimizer uses Optuna with SQLite persistent storage, making it fully resumable:
+- Optimization state saved to `optuna_study.db`
+- Interrupted runs can be resumed by simply re-running the script
+- Progress logged to `ftmo_optimization_progress.txt`
+
+### Check Progress (--status mode)
+
+Check optimization progress anytime without running new trials:
+```bash
+python ftmo_challenge_analyzer.py --status
+```
+
+This shows:
+- Completed trials count
+- Current best value and parameters
+- Last update time
+- Last 10 progress log entries
+
+### Run More Trials
+
+Add more trials to existing optimization (they accumulate):
+```bash
+python ftmo_challenge_analyzer.py --trials 100
+```
+
+Default is 5 trials for testing. For full optimization, use 100-500 trials.
+
+### Output Files
 
 All trades from the final full-year backtest are exported to:
 `ftmo_analysis_output/all_trades_2024_full.csv`
