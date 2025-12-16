@@ -28,7 +28,7 @@ ASSETS = [
     "SPX500_USD", "NAS100_USD",
 ]
 
-TIMEFRAMES = ["D", "H4", "W"]  # Skip M (monthly) - rarely needed
+TIMEFRAMES = ["D", "H4", "W", "M"]
 TF_MAP = {"D": "D1", "H4": "H4", "W": "W1", "M": "MN"}
 
 def main():
@@ -37,7 +37,7 @@ def main():
     print("=" * 70)
     print(f"Assets: {len(ASSETS)}")
     print(f"Date range: 2023-01-01 to 2025-12-16")
-    print(f"Timeframes: D1, H4, W1")
+    print(f"Timeframes: D1, H4, W1, MN")
     print(f"Skipping already downloaded files")
     print("=" * 70)
 
