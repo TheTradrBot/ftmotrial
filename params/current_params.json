@@ -2,13 +2,16 @@
   "min_confluence": 5,
   "min_quality_factors": 1,
   "risk_per_trade_pct": 0.5,
-  "atr_min_percentile": 70.0,
+  "atr_min_percentile": 75.0,
+  "trail_activation_r": 2.2,
+  "december_atr_multiplier": 1.5,
+  "volatile_asset_boost": 1.5,
   "ml_min_prob": 0.6389836184305566,
   "bollinger_std": 2.069333617546399,
   "rsi_period": 12,
   "use_mean_reversion_filter": false,
   "use_rsi_divergence_filter": true,
-  "generated_at": "2025-12-15T21:29:12.791730Z",
+  "generated_at": "2025-12-16T08:00:00.000000Z",
   "generated_by": "ftmo_challenge_analyzer.py",
-  "version": "1.0.0"
+  "version": "2.0.0"
 }

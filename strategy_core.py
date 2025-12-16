@@ -146,6 +146,11 @@ class StrategyParams:
     # ML filter parameters
     ml_min_prob: float = 0.6
     
+    # New FTMO challenge parameters
+    trail_activation_r: float = 2.2  # Delay trailing stop activation until this R is reached
+    december_atr_multiplier: float = 1.5  # Extra strict ATR threshold only in December
+    volatile_asset_boost: float = 1.5  # Boost scoring for high-ATR assets
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary."""
         return {
@@ -195,6 +200,9 @@ class StrategyParams:
             "bollinger_period": self.bollinger_period,
             "bollinger_std": self.bollinger_std,
             "ml_min_prob": self.ml_min_prob,
+            "trail_activation_r": self.trail_activation_r,
+            "december_atr_multiplier": self.december_atr_multiplier,
+            "volatile_asset_boost": self.volatile_asset_boost,
         }
     
     @classmethod
@@ -2573,17 +2581,41 @@ def apply_ml_filter(
 def check_volatility_filter(
     candles: List[Dict],
     atr_min_percentile: float = 60.0,
+    current_date: Optional[datetime] = None,
+    december_atr_multiplier: float = 1.0,
 ) -> Tuple[bool, float]:
     """
     Check if current volatility is above minimum threshold.
-    
-    Args:
-        candles: List of OHLCV candle dictionaries
-        atr_min_percentile: Minimum ATR percentile threshold
-    
-    Returns:
-        Tuple of (passes_filter, current_percentile)
+    In December, applies december_atr_multiplier to be more strict.
     """
     _, atr_percentile = _calculate_atr_percentile(candles, period=14, lookback=100)
-    passes_filter = atr_percentile >= atr_min_percentile
+    
+    effective_threshold = atr_min_percentile
+    if current_date and current_date.month == 12:
+        effective_threshold = min(95.0, atr_min_percentile * december_atr_multiplier)
+    
+    passes_filter = atr_percentile >= effective_threshold
     return (passes_filter, atr_percentile)
+
+
+VOLATILE_ASSETS = ["XAU_USD", "XAUUSD", "NAS100_USD", "NAS100USD", "GBP_JPY", "GBPJPY", "BTC_USD", "BTCUSD"]
+
+def apply_volatile_asset_boost(
+    symbol: str,
+    confluence_score: int,
+    quality_factors: int,
+    volatile_asset_boost: float = 1.0,
+) -> Tuple[int, int]:
+    """
+    Apply boost to confluence/quality scores for volatile assets.
+    These assets (XAUUSD, NAS100USD, GBPJPY, BTCUSD) have potential for bigger R trades.
+    """
+    normalized_symbol = symbol.replace("_", "").upper()
+    is_volatile = any(v.replace("_", "").upper() == normalized_symbol for v in VOLATILE_ASSETS)
+    
+    if is_volatile and volatile_asset_boost > 1.0:
+        boosted_confluence = int(confluence_score * volatile_asset_boost)
+        boosted_quality = int(quality_factors * volatile_asset_boost)
+        return (boosted_confluence, boosted_quality)
+    
+    return (confluence_score, quality_factors)
