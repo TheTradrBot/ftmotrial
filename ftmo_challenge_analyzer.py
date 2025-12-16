@@ -48,10 +48,8 @@ from strategy_core import (
     check_volatility_filter,
 )
 
-from data_provider import get_ohlcv as get_ohlcv_api
 from ftmo_config import FTMO_CONFIG, FTMO10KConfig, get_pip_size, get_sl_limits
 from config import FOREX_PAIRS, METALS, INDICES, CRYPTO_ASSETS
-from tradr.data.oanda import OandaClient
 from tradr.risk.position_sizing import calculate_lot_size, get_contract_specs
 from params.params_loader import save_optimized_params
 
@@ -59,6 +57,8 @@ OUTPUT_DIR = Path("ftmo_analysis_output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 OPTUNA_DB_PATH = "sqlite:///optuna_study.db"
+
+_DATA_CACHE: Dict[str, List[Dict]] = {}
 OPTUNA_STUDY_NAME = "ftmo_study"
 PROGRESS_LOG_FILE = "ftmo_optimization_progress.txt"
 
@@ -487,7 +487,8 @@ def run_monte_carlo_analysis(trades: List[Any], num_simulations: int = 1000) -> 
 
 
 def load_ohlcv_data(symbol: str, timeframe: str, start_date: datetime, end_date: datetime) -> List[Dict]:
-    """Load OHLCV data from local CSV files or API."""
+    """Load OHLCV data from local CSV files only (no API calls). Uses cache for performance."""
+    global _DATA_CACHE
     data_dir = Path("data/ohlcv")
     
     symbol_normalized = symbol.replace("_", "").replace("/", "")
@@ -495,10 +496,16 @@ def load_ohlcv_data(symbol: str, timeframe: str, start_date: datetime, end_date:
     tf_map = {"D1": "D1", "H4": "H4", "W1": "W1", "MN": "MN"}
     tf = tf_map.get(timeframe, timeframe)
     
-    pattern = f"{symbol_normalized}_{tf}_*.csv"
-    matches = list(data_dir.glob(pattern))
+    cache_key = f"{symbol_normalized}_{tf}"
     
-    if matches:
+    if cache_key not in _DATA_CACHE:
+        pattern = f"{symbol_normalized}_{tf}_*.csv"
+        matches = list(data_dir.glob(pattern))
+        
+        if not matches:
+            _DATA_CACHE[cache_key] = []
+            return []
+        
         csv_path = matches[0]
         try:
             df = pd.read_csv(csv_path)
@@ -511,9 +518,6 @@ def load_ohlcv_data(symbol: str, timeframe: str, start_date: datetime, end_date:
             
             if date_col:
                 df[date_col] = pd.to_datetime(df[date_col], utc=True)
-                start_ts = pd.Timestamp(start_date, tz='UTC') if start_date.tzinfo is None else pd.Timestamp(start_date)
-                end_ts = pd.Timestamp(end_date, tz='UTC') if end_date.tzinfo is None else pd.Timestamp(end_date)
-                df = df[(df[date_col] >= start_ts) & (df[date_col] <= end_ts)]
             
             candles = []
             for _, row in df.iterrows():
@@ -527,15 +531,20 @@ def load_ohlcv_data(symbol: str, timeframe: str, start_date: datetime, end_date:
                 }
                 candles.append(candle)
             
-            return candles
+            _DATA_CACHE[cache_key] = candles
         except Exception as e:
             print(f"Error loading {csv_path}: {e}")
+            _DATA_CACHE[cache_key] = []
     
-    try:
-        days_needed = (end_date - start_date).days + 100
-        return get_ohlcv_api(symbol, timeframe, count=days_needed, use_cache=True, start_date=start_date)
-    except Exception:
+    all_candles = _DATA_CACHE[cache_key]
+    if not all_candles:
         return []
+    
+    start_ts = pd.Timestamp(start_date, tz='UTC') if start_date.tzinfo is None else pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date, tz='UTC') if end_date.tzinfo is None else pd.Timestamp(end_date)
+    
+    filtered = [c for c in all_candles if c.get("time") and start_ts <= c["time"] <= end_ts]
+    return filtered
 
 
 def get_all_trading_assets() -> List[str]:
@@ -933,7 +942,7 @@ class OptunaOptimizer:
         if total_r <= 0:
             return -50000.0
         
-        quarterly_r = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0}
+        quarterly_r = {q: 0.0 for q in TRAINING_QUARTERS.keys()}
         for t in training_trades:
             entry = getattr(t, 'entry_date', None)
             if entry:
@@ -1064,6 +1073,112 @@ class OptunaOptimizer:
             'n_trials': n_trials,
             'total_trials': len(study.trials),
         }
+
+
+def generate_summary_txt(
+    results: Dict,
+    training_trades: List,
+    validation_trades: List,
+    full_year_trades: List,
+    best_params: Dict
+) -> str:
+    """Generate a summary text file after each analyzer run."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary_filename = OUTPUT_DIR / f"analysis_summary_{timestamp}.txt"
+    
+    def calc_stats(trades):
+        if not trades:
+            return {"count": 0, "total_r": 0, "win_rate": 0, "avg_r": 0}
+        total_r = sum(getattr(t, 'rr', 0) for t in trades)
+        wins = sum(1 for t in trades if getattr(t, 'rr', 0) > 0)
+        win_rate = (wins / len(trades) * 100) if trades else 0
+        avg_r = total_r / len(trades) if trades else 0
+        return {"count": len(trades), "total_r": total_r, "win_rate": win_rate, "avg_r": avg_r}
+    
+    training_stats = calc_stats(training_trades)
+    validation_stats = calc_stats(validation_trades)
+    full_stats = calc_stats(full_year_trades)
+    
+    lines = [
+        "=" * 80,
+        "FTMO CHALLENGE ANALYZER - SUMMARY REPORT",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "=" * 80,
+        "",
+        "OPTIMIZATION RESULTS",
+        "-" * 40,
+        f"Best Score: {results.get('best_score', 0):.2f}",
+        f"Trials This Session: {results.get('n_trials', 0)}",
+        f"Total Trials: {results.get('total_trials', 0)}",
+        "",
+        "BEST PARAMETERS",
+        "-" * 40,
+    ]
+    
+    for k, v in sorted(best_params.items()):
+        if isinstance(v, float):
+            lines.append(f"  {k}: {v:.4f}")
+        else:
+            lines.append(f"  {k}: {v}")
+    
+    lines.extend([
+        "",
+        "TRAINING PERIOD (2023-01-01 to 2024-09-30)",
+        "-" * 40,
+        f"  Trades: {training_stats['count']}",
+        f"  Total R: {training_stats['total_r']:+.2f}",
+        f"  Win Rate: {training_stats['win_rate']:.1f}%",
+        f"  Avg R per Trade: {training_stats['avg_r']:+.3f}",
+        "",
+        f"VALIDATION PERIOD (2024-10-01 to {VALIDATION_END.strftime('%Y-%m-%d')})",
+        "-" * 40,
+        f"  Trades: {validation_stats['count']}",
+        f"  Total R: {validation_stats['total_r']:+.2f}",
+        f"  Win Rate: {validation_stats['win_rate']:.1f}%",
+        f"  Avg R per Trade: {validation_stats['avg_r']:+.3f}",
+        "",
+        "FULL PERIOD (2023-2025)",
+        "-" * 40,
+        f"  Trades: {full_stats['count']}",
+        f"  Total R: {full_stats['total_r']:+.2f}",
+        f"  Win Rate: {full_stats['win_rate']:.1f}%",
+        f"  Avg R per Trade: {full_stats['avg_r']:+.3f}",
+        "",
+        "QUARTERLY BREAKDOWN",
+        "-" * 40,
+    ])
+    
+    for q_name, (q_start, q_end) in sorted(QUARTERS_ALL.items()):
+        q_filtered = []
+        for t in full_year_trades:
+            entry = getattr(t, 'entry_date', None)
+            if entry:
+                if isinstance(entry, str):
+                    try:
+                        entry = datetime.fromisoformat(entry.replace("Z", "+00:00"))
+                    except:
+                        continue
+                if hasattr(entry, 'replace') and entry.tzinfo:
+                    entry = entry.replace(tzinfo=None)
+                if q_start <= entry <= q_end:
+                    q_filtered.append(t)
+        
+        q_r = sum(getattr(t, 'rr', 0) for t in q_filtered)
+        q_wins = sum(1 for t in q_filtered if getattr(t, 'rr', 0) > 0)
+        q_wr = (q_wins / len(q_filtered) * 100) if q_filtered else 0
+        lines.append(f"  {q_name}: {len(q_filtered)} trades, {q_r:+.1f}R, {q_wr:.0f}% win rate")
+    
+    lines.extend([
+        "",
+        "=" * 80,
+        "End of Summary",
+        "=" * 80,
+    ])
+    
+    with open(summary_filename, 'w') as f:
+        f.write("\n".join(lines))
+    
+    return str(summary_filename)
 
 
 def main():
@@ -1242,6 +1357,15 @@ def main():
     print(f"  - ftmo_optimization_progress.txt (progress log)")
     
     print(f"\nDocumentation updated. CSV exported. Ready for live trading.")
+    
+    summary_file = generate_summary_txt(
+        results=results,
+        training_trades=training_trades,
+        validation_trades=validation_trades,
+        full_year_trades=full_year_trades,
+        best_params=best_params
+    )
+    print(f"\nSummary saved to: {summary_file}")
 
 
 if __name__ == "__main__":
