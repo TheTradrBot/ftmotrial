@@ -22,3 +22,9 @@ flask-cors
 optuna
 python-dotenv
 scikit-learn
+flask
+flask-cors
+joblib
+optuna
+python-dotenv
+scikit-learn
