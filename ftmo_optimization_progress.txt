@@ -168,3 +168,13 @@
 [2025-12-17 21:22:58] Trial #3: value=11060, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
 [2025-12-17 21:24:53] Trial #4: value=15446, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
 [2025-12-17 21:25:47] Trial #5: value=-50000, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:26:46] Trial #6: value=1961, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:28:42] Trial #7: value=17579, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:30:08] Trial #8: value=-50000, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:32:04] Trial #9: value=16038, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:33:14] Trial #10: value=30268, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:34:25] Trial #11: value=30268, best_value=37675, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 6, "min_quality_factors": 2, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:36:26] Trial #12: value=60939, best_value=60939, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 3, "min_quality_factors": 1, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:38:19] Trial #13: value=58846, best_value=60939, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 3, "min_quality_factors": 1, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:40:13] Trial #14: value=58846, best_value=60939, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 3, "min_quality_factors": 1, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
+[2025-12-17 21:41:53] Trial #15: value=58846, best_value=60939, params={"risk_per_trade_pct": 0.8, "min_confluence_score": 3, "min_quality_factors": 1, "adx_trend_threshold": 23.0, "adx_range_threshold": 20.0}
