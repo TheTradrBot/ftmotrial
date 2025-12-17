@@ -151,6 +151,35 @@ class StrategyParams:
     december_atr_multiplier: float = 1.5  # Extra strict ATR threshold only in December
     volatile_asset_boost: float = 1.5  # Boost scoring for high-ATR assets
     
+    # ============================================================================
+    # REGIME-ADAPTIVE V2 PARAMETERS
+    # These control the dual-mode trading system: Trend Mode + Conservative Range Mode
+    # ============================================================================
+    
+    # Regime Detection Thresholds
+    # ADX >= adx_trend_threshold: Trend Mode (momentum following)
+    # ADX < adx_range_threshold: Range Mode (mean reversion, ultra-conservative)
+    # ADX in between: Transition Zone (NO ENTRIES - wait for confirmation)
+    adx_trend_threshold: float = 25.0  # ADX threshold for trend mode activation
+    adx_range_threshold: float = 20.0  # ADX threshold below which range mode activates
+    
+    # Range Mode Filters (Ultra-Conservative Mean Reversion)
+    # ALL conditions must be met for Range Mode entry
+    range_min_confluence: int = 5  # Minimum confluence score for range mode entries
+    rsi_oversold_range: float = 25.0  # RSI below this for long entries in range mode
+    rsi_overbought_range: float = 75.0  # RSI above this for short entries in range mode
+    atr_volatility_ratio: float = 0.8  # Current ATR(14) must be < this * ATR(50) average
+    fib_range_target: float = 0.786  # Fib retracement level for range mode entries
+    
+    # Trend Mode Parameters
+    trend_min_confluence: int = 6  # Minimum confluence for trend mode entries
+    trend_rsi_filter_enabled: bool = True  # Enable RSI filtering in trend mode
+    
+    # Partial Profit Taking and Trail Management
+    partial_exit_at_1r: bool = True  # Take partial profit at 1R
+    partial_exit_pct: float = 0.50  # Percentage to close at 1R (50%)
+    atr_trail_multiplier: float = 1.5  # ATR multiplier for trailing stop distance
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary."""
         return {
@@ -203,6 +232,18 @@ class StrategyParams:
             "trail_activation_r": self.trail_activation_r,
             "december_atr_multiplier": self.december_atr_multiplier,
             "volatile_asset_boost": self.volatile_asset_boost,
+            "adx_trend_threshold": self.adx_trend_threshold,
+            "adx_range_threshold": self.adx_range_threshold,
+            "range_min_confluence": self.range_min_confluence,
+            "rsi_oversold_range": self.rsi_oversold_range,
+            "rsi_overbought_range": self.rsi_overbought_range,
+            "atr_volatility_ratio": self.atr_volatility_ratio,
+            "fib_range_target": self.fib_range_target,
+            "trend_min_confluence": self.trend_min_confluence,
+            "trend_rsi_filter_enabled": self.trend_rsi_filter_enabled,
+            "partial_exit_at_1r": self.partial_exit_at_1r,
+            "partial_exit_pct": self.partial_exit_pct,
+            "atr_trail_multiplier": self.atr_trail_multiplier,
         }
     
     @classmethod
@@ -362,6 +403,504 @@ def _calculate_atr_percentile(candles: List[Dict], period: int = 14, lookback: i
     percentile = (rank / len(sorted_atrs)) * 100
     
     return current_atr, percentile
+
+
+def calculate_adx(candles: List[Dict], period: int = 14) -> float:
+    """
+    Calculate Average Directional Index (ADX) for trend strength measurement.
+    
+    ADX measures trend strength regardless of direction:
+    - ADX > 25: Strong trend (good for trend following)
+    - ADX 20-25: Moderate trend (transition zone)
+    - ADX < 20: Weak trend/ranging market (consider mean reversion)
+    
+    Args:
+        candles: List of OHLCV candle dictionaries
+        period: ADX period (default 14)
+    
+    Returns:
+        ADX value (0-100 scale)
+    """
+    if len(candles) < period * 2:
+        return 0.0
+    
+    highs = [c.get("high", 0) for c in candles]
+    lows = [c.get("low", 0) for c in candles]
+    closes = [c.get("close", 0) for c in candles]
+    
+    plus_dm = []
+    minus_dm = []
+    tr_values = []
+    
+    for i in range(1, len(candles)):
+        high_diff = highs[i] - highs[i-1]
+        low_diff = lows[i-1] - lows[i]
+        
+        if high_diff > low_diff and high_diff > 0:
+            plus_dm.append(high_diff)
+        else:
+            plus_dm.append(0)
+        
+        if low_diff > high_diff and low_diff > 0:
+            minus_dm.append(low_diff)
+        else:
+            minus_dm.append(0)
+        
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i-1]),
+            abs(lows[i] - closes[i-1])
+        )
+        tr_values.append(tr)
+    
+    if len(tr_values) < period:
+        return 0.0
+    
+    smoothed_plus_dm = sum(plus_dm[:period])
+    smoothed_minus_dm = sum(minus_dm[:period])
+    smoothed_tr = sum(tr_values[:period])
+    
+    dx_values = []
+    
+    for i in range(period, len(tr_values)):
+        smoothed_plus_dm = smoothed_plus_dm - (smoothed_plus_dm / period) + plus_dm[i]
+        smoothed_minus_dm = smoothed_minus_dm - (smoothed_minus_dm / period) + minus_dm[i]
+        smoothed_tr = smoothed_tr - (smoothed_tr / period) + tr_values[i]
+        
+        if smoothed_tr == 0:
+            continue
+            
+        plus_di = 100 * smoothed_plus_dm / smoothed_tr
+        minus_di = 100 * smoothed_minus_dm / smoothed_tr
+        
+        di_sum = plus_di + minus_di
+        if di_sum == 0:
+            dx = 0
+        else:
+            dx = 100 * abs(plus_di - minus_di) / di_sum
+        dx_values.append(dx)
+    
+    if not dx_values:
+        return 0.0
+    
+    if len(dx_values) < period:
+        return sum(dx_values) / len(dx_values)
+    
+    adx = sum(dx_values[:period]) / period
+    for i in range(period, len(dx_values)):
+        adx = ((adx * (period - 1)) + dx_values[i]) / period
+    
+    return adx
+
+
+def detect_regime(
+    daily_candles: List[Dict],
+    adx_trend_threshold: float = 25.0,
+    adx_range_threshold: float = 20.0
+) -> Dict:
+    """
+    Detect market regime based on ADX (Average Directional Index).
+    
+    This is the core function for the Regime-Adaptive V2 trading system.
+    It classifies the current market into one of three regimes:
+    
+    1. TREND MODE (ADX >= adx_trend_threshold):
+       - Market has strong directional movement
+       - Trade with momentum: use trend-following entries
+       - Higher confluence requirements, larger position sizing allowed
+       
+    2. RANGE MODE (ADX < adx_range_threshold):
+       - Market is ranging/consolidating
+       - Trade mean reversion: fade extremes at S/R zones
+       - Ultra-conservative: ALL range mode filters must pass
+       - Require RSI extremes, Fib 0.786, H4 rejection candles
+       
+    3. TRANSITION ZONE (ADX between thresholds):
+       - Market is transitioning between regimes
+       - NO ENTRIES ALLOWED - wait for regime confirmation
+       - This prevents whipsaws during regime changes
+    
+    Args:
+        daily_candles: List of D1 OHLCV candle dictionaries
+        adx_trend_threshold: ADX level for trend mode (default 25.0)
+        adx_range_threshold: ADX level for range mode (default 20.0)
+    
+    Returns:
+        Dict with keys:
+            'mode': str - 'Trend', 'Range', or 'Transition'
+            'adx': float - Current ADX value
+            'can_trade': bool - Whether entries are allowed in this regime
+            'description': str - Human-readable regime description
+    
+    Note:
+        - No look-ahead bias: uses only data up to current candle
+        - ADX is calculated using standard 14-period smoothing
+    """
+    adx = calculate_adx(daily_candles, period=14)
+    
+    if adx >= adx_trend_threshold:
+        return {
+            'mode': 'Trend',
+            'adx': adx,
+            'can_trade': True,
+            'description': f'Trend Mode: ADX={adx:.1f} >= {adx_trend_threshold} (momentum trading allowed)'
+        }
+    elif adx < adx_range_threshold:
+        return {
+            'mode': 'Range',
+            'adx': adx,
+            'can_trade': True,
+            'description': f'Range Mode: ADX={adx:.1f} < {adx_range_threshold} (conservative mean reversion only)'
+        }
+    else:
+        return {
+            'mode': 'Transition',
+            'adx': adx,
+            'can_trade': False,
+            'description': f'Transition Zone: ADX={adx:.1f} between {adx_range_threshold}-{adx_trend_threshold} (NO ENTRIES)'
+        }
+
+
+def _calculate_rsi(candles: List[Dict], period: int = 14) -> float:
+    """
+    Calculate Relative Strength Index (RSI).
+    
+    Args:
+        candles: List of OHLCV candle dictionaries
+        period: RSI period (default 14)
+    
+    Returns:
+        RSI value (0-100 scale)
+    """
+    if len(candles) < period + 1:
+        return 50.0  # Neutral RSI if insufficient data
+    
+    closes = [c.get("close", 0) for c in candles]
+    
+    gains = []
+    losses = []
+    
+    for i in range(1, len(closes)):
+        change = closes[i] - closes[i-1]
+        if change > 0:
+            gains.append(change)
+            losses.append(0)
+        else:
+            gains.append(0)
+            losses.append(abs(change))
+    
+    if len(gains) < period:
+        return 50.0
+    
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    
+    if avg_loss == 0:
+        return 100.0
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
+
+
+def _check_h4_rejection_candle(h4_candles: List[Dict], direction: str) -> Tuple[bool, str]:
+    """
+    Check for H4 rejection candle (engulfing or pinbar) at current level.
+    
+    Args:
+        h4_candles: List of H4 OHLCV candle dictionaries
+        direction: 'bullish' or 'bearish'
+    
+    Returns:
+        Tuple of (has_rejection, description)
+    """
+    if not h4_candles or len(h4_candles) < 3:
+        return False, "H4 Rejection: Insufficient data"
+    
+    last = h4_candles[-1]
+    prev = h4_candles[-2]
+    
+    body_last = abs(last["close"] - last["open"])
+    range_last = last["high"] - last["low"]
+    
+    if direction == "bullish":
+        is_engulfing = (
+            last["close"] > last["open"] and
+            prev["close"] < prev["open"] and
+            last["close"] > prev["open"] and
+            last["open"] < prev["close"]
+        )
+        
+        lower_wick = min(last["close"], last["open"]) - last["low"]
+        upper_wick = last["high"] - max(last["close"], last["open"])
+        is_pinbar = lower_wick > body_last * 2 and upper_wick < body_last * 0.5
+        
+        if is_engulfing:
+            return True, "H4 Rejection: Bullish engulfing pattern"
+        elif is_pinbar:
+            return True, "H4 Rejection: Bullish pinbar (hammer)"
+        else:
+            return False, "H4 Rejection: No bullish rejection pattern"
+    else:
+        is_engulfing = (
+            last["close"] < last["open"] and
+            prev["close"] > prev["open"] and
+            last["close"] < prev["open"] and
+            last["open"] > prev["close"]
+        )
+        
+        upper_wick = last["high"] - max(last["close"], last["open"])
+        lower_wick = min(last["close"], last["open"]) - last["low"]
+        is_pinbar = upper_wick > body_last * 2 and lower_wick < body_last * 0.5
+        
+        if is_engulfing:
+            return True, "H4 Rejection: Bearish engulfing pattern"
+        elif is_pinbar:
+            return True, "H4 Rejection: Bearish pinbar (shooting star)"
+        else:
+            return False, "H4 Rejection: No bearish rejection pattern"
+
+
+def _check_fib_786_zone(
+    candles: List[Dict],
+    price: float,
+    direction: str,
+    tolerance: float = 0.05
+) -> Tuple[bool, str]:
+    """
+    Check if price is in the Fib 0.786 retracement zone (±tolerance).
+    
+    This is specifically for Range Mode entries which require price
+    to be at deep retracement levels for mean reversion setups.
+    
+    Args:
+        candles: List of OHLCV candle dictionaries
+        price: Current price
+        direction: 'bullish' or 'bearish'
+        tolerance: Tolerance around 0.786 level (default ±0.05 = 0.736-0.836)
+    
+    Returns:
+        Tuple of (is_in_zone, description)
+    """
+    if not candles or len(candles) < 20:
+        return False, "Fib 0.786: Insufficient data"
+    
+    swing_highs, swing_lows = _find_pivots(candles[-30:], lookback=3)
+    
+    if not swing_highs or not swing_lows:
+        return False, "Fib 0.786: No swing points found"
+    
+    recent_high = max(swing_highs[-3:]) if len(swing_highs) >= 3 else max(swing_highs)
+    recent_low = min(swing_lows[-3:]) if len(swing_lows) >= 3 else min(swing_lows)
+    
+    swing_range = recent_high - recent_low
+    if swing_range <= 0:
+        return False, "Fib 0.786: Invalid swing range"
+    
+    fib_786_target = 0.786
+    fib_low = fib_786_target - tolerance
+    fib_high = fib_786_target + tolerance
+    
+    if direction == "bullish":
+        fib_low_price = recent_high - swing_range * fib_high
+        fib_high_price = recent_high - swing_range * fib_low
+        
+        if fib_low_price <= price <= fib_high_price:
+            retracement = (recent_high - price) / swing_range
+            return True, f"Fib 0.786: Price at {retracement:.1%} retracement (target zone)"
+        else:
+            return False, f"Fib 0.786: Price not in {fib_low:.1%}-{fib_high:.1%} zone"
+    else:
+        fib_low_price = recent_low + swing_range * fib_low
+        fib_high_price = recent_low + swing_range * fib_high
+        
+        if fib_low_price <= price <= fib_high_price:
+            retracement = (price - recent_low) / swing_range
+            return True, f"Fib 0.786: Price at {retracement:.1%} retracement (target zone)"
+        else:
+            return False, f"Fib 0.786: Price not in {fib_low:.1%}-{fib_high:.1%} zone"
+
+
+def validate_range_mode_entry(
+    daily_candles: List[Dict],
+    h4_candles: Optional[List[Dict]],
+    weekly_candles: Optional[List[Dict]],
+    monthly_candles: Optional[List[Dict]],
+    price: float,
+    direction: str,
+    confluence_score: int,
+    params: Optional["StrategyParams"] = None,
+    historical_sr: Optional[Dict[str, List[Dict]]] = None,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Validate entry for Range Mode (conservative mean reversion).
+    
+    Range Mode is ultra-conservative and requires ALL of the following conditions:
+    
+    1. Confluence Score >= min_confluence (5-6)
+       - Even in ranging markets, we need multiple confirming factors
+    
+    2. Price at Major S/R Zone
+       - Uses existing location helpers to check for support/resistance
+       - Historical HTF levels carry more weight
+    
+    3. Price in Fib 0.786 Retracement Zone (±0.05 tolerance)
+       - Deep retracement = better risk/reward for mean reversion
+       - 0.786 is the classic "last chance" Fib level
+    
+    4. H4 Rejection Candle (Engulfing or Pinbar)
+       - Confirms price rejection at the level
+       - Without rejection, no entry allowed
+    
+    5. RSI Extremes
+       - For longs: RSI < rsi_oversold (20-28)
+       - For shorts: RSI > rsi_overbought (72-80)
+       - Extreme readings increase mean reversion probability
+    
+    6. ATR Volatility Filter
+       - Current ATR(14) < atr_volatility_ratio * ATR(50) average
+       - Low volatility = ranging market confirmation
+       - High volatility = avoid (may break out)
+    
+    Args:
+        daily_candles: D1 OHLCV data
+        h4_candles: H4 OHLCV data (for rejection candle check)
+        weekly_candles: W1 OHLCV data (for location context)
+        monthly_candles: MN OHLCV data (for location context)
+        price: Current price
+        direction: 'bullish' or 'bearish'
+        confluence_score: Pre-calculated confluence score
+        params: StrategyParams with range mode thresholds
+        historical_sr: Optional historical S/R levels
+    
+    Returns:
+        Tuple of (is_valid, details_dict)
+        - is_valid: True only if ALL conditions pass
+        - details_dict: Contains each check result and notes
+    """
+    from dataclasses import dataclass
+    
+    if params is None:
+        params = StrategyParams()
+    
+    details = {
+        'confluence_check': {'passed': False, 'note': ''},
+        'location_check': {'passed': False, 'note': ''},
+        'fib_786_check': {'passed': False, 'note': ''},
+        'h4_rejection_check': {'passed': False, 'note': ''},
+        'rsi_check': {'passed': False, 'note': ''},
+        'atr_volatility_check': {'passed': False, 'note': ''},
+        'all_passed': False,
+        'failed_checks': [],
+    }
+    
+    min_confluence = params.range_min_confluence
+    if confluence_score >= min_confluence:
+        details['confluence_check'] = {
+            'passed': True,
+            'note': f'Confluence {confluence_score} >= {min_confluence}'
+        }
+    else:
+        details['confluence_check'] = {
+            'passed': False,
+            'note': f'Confluence {confluence_score} < {min_confluence}'
+        }
+        details['failed_checks'].append('confluence')
+    
+    location_note, is_at_sr = _location_context(
+        monthly_candles, weekly_candles, daily_candles, price, direction, historical_sr
+    )
+    if is_at_sr:
+        details['location_check'] = {'passed': True, 'note': location_note}
+    else:
+        details['location_check'] = {'passed': False, 'note': location_note}
+        details['failed_checks'].append('location')
+    
+    fib_in_zone, fib_note = _check_fib_786_zone(
+        daily_candles, price, direction, tolerance=0.05
+    )
+    if fib_in_zone:
+        details['fib_786_check'] = {'passed': True, 'note': fib_note}
+    else:
+        details['fib_786_check'] = {'passed': False, 'note': fib_note}
+        details['failed_checks'].append('fib_786')
+    
+    h4_data = h4_candles if h4_candles and len(h4_candles) >= 3 else daily_candles[-10:]
+    has_rejection, rejection_note = _check_h4_rejection_candle(h4_data, direction)
+    if has_rejection:
+        details['h4_rejection_check'] = {'passed': True, 'note': rejection_note}
+    else:
+        details['h4_rejection_check'] = {'passed': False, 'note': rejection_note}
+        details['failed_checks'].append('h4_rejection')
+    
+    rsi = _calculate_rsi(daily_candles, period=14)
+    if direction == "bullish":
+        if rsi < params.rsi_oversold_range:
+            details['rsi_check'] = {
+                'passed': True,
+                'note': f'RSI {rsi:.1f} < {params.rsi_oversold_range} (oversold for longs)'
+            }
+        else:
+            details['rsi_check'] = {
+                'passed': False,
+                'note': f'RSI {rsi:.1f} >= {params.rsi_oversold_range} (not oversold)'
+            }
+            details['failed_checks'].append('rsi')
+    else:
+        if rsi > params.rsi_overbought_range:
+            details['rsi_check'] = {
+                'passed': True,
+                'note': f'RSI {rsi:.1f} > {params.rsi_overbought_range} (overbought for shorts)'
+            }
+        else:
+            details['rsi_check'] = {
+                'passed': False,
+                'note': f'RSI {rsi:.1f} <= {params.rsi_overbought_range} (not overbought)'
+            }
+            details['failed_checks'].append('rsi')
+    
+    current_atr = _atr(daily_candles, period=14)
+    long_atr = _atr(daily_candles, period=50) if len(daily_candles) >= 51 else current_atr
+    
+    if long_atr > 0:
+        atr_ratio = current_atr / long_atr
+        threshold = params.atr_volatility_ratio
+        
+        if atr_ratio < threshold:
+            details['atr_volatility_check'] = {
+                'passed': True,
+                'note': f'ATR ratio {atr_ratio:.2f} < {threshold} (low volatility confirmed)'
+            }
+        else:
+            details['atr_volatility_check'] = {
+                'passed': False,
+                'note': f'ATR ratio {atr_ratio:.2f} >= {threshold} (volatility too high)'
+            }
+            details['failed_checks'].append('atr_volatility')
+    else:
+        details['atr_volatility_check'] = {
+            'passed': False,
+            'note': 'ATR: Unable to calculate'
+        }
+        details['failed_checks'].append('atr_volatility')
+    
+    all_passed = (
+        details['confluence_check']['passed'] and
+        details['location_check']['passed'] and
+        details['fib_786_check']['passed'] and
+        details['h4_rejection_check']['passed'] and
+        details['rsi_check']['passed'] and
+        details['atr_volatility_check']['passed']
+    )
+    
+    details['all_passed'] = all_passed
+    
+    return all_passed, details
 
 
 def calculate_volatility_parity_risk(
