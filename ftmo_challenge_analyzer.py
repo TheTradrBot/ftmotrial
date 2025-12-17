@@ -949,14 +949,23 @@ class OptunaOptimizer:
         )
         
         if not training_trades or len(training_trades) == 0:
+            trial.set_user_attr('quarterly_stats', {})
+            trial.set_user_attr('overall_stats', {'trades': 0, 'profit': 0, 'win_rate': 0})
             return -50000.0
         
         total_r = sum(getattr(t, 'rr', 0) for t in training_trades)
+        total_trades = len(training_trades)
+        wins = sum(1 for t in training_trades if getattr(t, 'rr', 0) > 0)
+        overall_win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
         
         if total_r <= 0:
+            trial.set_user_attr('quarterly_stats', {})
+            trial.set_user_attr('overall_stats', {'trades': total_trades, 'profit': total_r, 'win_rate': overall_win_rate})
             return -50000.0
         
         quarterly_r = {q: 0.0 for q in TRAINING_QUARTERS.keys()}
+        quarterly_trades = {q: [] for q in TRAINING_QUARTERS.keys()}
+        
         for t in training_trades:
             entry = getattr(t, 'entry_date', None)
             if entry:
@@ -971,7 +980,35 @@ class OptunaOptimizer:
                 for q, (q_start, q_end) in TRAINING_QUARTERS.items():
                     if q_start <= entry <= q_end:
                         quarterly_r[q] += getattr(t, 'rr', 0)
+                        quarterly_trades[q].append(t)
                         break
+        
+        risk_usd = ACCOUNT_SIZE * (params['risk_per_trade_pct'] / 100)
+        
+        quarterly_stats = {}
+        for q in TRAINING_QUARTERS.keys():
+            q_trades = quarterly_trades[q]
+            q_total = len(q_trades)
+            q_wins = sum(1 for t in q_trades if getattr(t, 'rr', 0) > 0)
+            q_r = quarterly_r[q]
+            q_profit = q_r * risk_usd
+            q_wr = (q_wins / q_total * 100) if q_total > 0 else 0
+            quarterly_stats[q] = {
+                'trades': q_total,
+                'wins': q_wins,
+                'r_total': round(q_r, 2),
+                'profit': round(q_profit, 2),
+                'win_rate': round(q_wr, 1)
+            }
+        
+        trial.set_user_attr('quarterly_stats', quarterly_stats)
+        trial.set_user_attr('overall_stats', {
+            'trades': total_trades,
+            'wins': wins,
+            'r_total': round(total_r, 2),
+            'profit': round(total_r * risk_usd, 2),
+            'win_rate': round(overall_win_rate, 1)
+        })
         
         penalty = 0.0
         for q, r_val in quarterly_r.items():
@@ -992,7 +1029,6 @@ class OptunaOptimizer:
         if max_dd_r > 15.0:
             penalty += 10000
         
-        risk_usd = ACCOUNT_SIZE * (params['risk_per_trade_pct'] / 100)
         total_net_profit = total_r * risk_usd
         
         score = total_net_profit - penalty
@@ -1042,11 +1078,36 @@ class OptunaOptimizer:
                 best_value=study.best_value if study.best_trial else 0,
                 best_params=study.best_params if study.best_trial else {}
             )
+            
+            quarterly_stats = trial.user_attrs.get('quarterly_stats', {})
+            overall_stats = trial.user_attrs.get('overall_stats', {})
+            
+            print(f"\n{'─'*70}")
+            print(f"TRIAL #{trial.number} COMPLETE | Score: {trial.value:.0f} | Best: {study.best_value:.0f}")
+            print(f"{'─'*70}")
+            
+            if quarterly_stats:
+                print(f"{'Quarter':<10} {'Trades':>8} {'Wins':>6} {'Win%':>8} {'R-Total':>10} {'Profit $':>12}")
+                print(f"{'-'*70}")
+                for q in sorted(quarterly_stats.keys()):
+                    qs = quarterly_stats[q]
+                    profit_str = f"${qs['profit']:,.0f}" if qs['profit'] >= 0 else f"-${abs(qs['profit']):,.0f}"
+                    print(f"{q:<10} {qs['trades']:>8} {qs['wins']:>6} {qs['win_rate']:>7.1f}% {qs['r_total']:>10.2f} {profit_str:>12}")
+                
+                print(f"{'-'*70}")
+                if overall_stats:
+                    overall_profit = overall_stats.get('profit', 0)
+                    profit_str = f"${overall_profit:,.0f}" if overall_profit >= 0 else f"-${abs(overall_profit):,.0f}"
+                    print(f"{'OVERALL':<10} {overall_stats.get('trades', 0):>8} {overall_stats.get('wins', 0):>6} {overall_stats.get('win_rate', 0):>7.1f}% {overall_stats.get('r_total', 0):>10.2f} {profit_str:>12}")
+            else:
+                print("  No trades generated for this trial")
+            
+            print(f"{'─'*70}\n")
         
         study.optimize(
             self._objective,
             n_trials=n_trials,
-            show_progress_bar=True,
+            show_progress_bar=False,
             callbacks=[progress_callback]
         )
         
