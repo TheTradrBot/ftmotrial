@@ -33,3 +33,7 @@ scipy
 tabulate
 flask
 flask
+discord.py
+numpy
+pandas
+requests
