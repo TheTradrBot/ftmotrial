@@ -41,3 +41,15 @@ discord.py
 numpy
 pandas
 requests
+discord.py
+flask
+flask-cors
+joblib
+numpy
+optuna
+pandas
+python-dotenv
+requests
+scikit-learn
+scipy
+tabulate
