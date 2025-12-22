@@ -1088,10 +1088,9 @@ class OptunaOptimizer:
             'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 1.5, step=0.1),
             'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 1.6, step=0.1),
             
-            # Advanced toggles (DISABLED - causing empty trades)
+            # Advanced toggles (DISABLED)
             'use_adx_slope_rising': False,
             'use_fib_0786_only': False,
-            'use_liquidity_sweep_required': False,
             'use_market_structure_bos_only': False,
             'use_atr_trailing': False,
             'use_volatility_sizing_boost': False,
@@ -1124,7 +1123,6 @@ class OptunaOptimizer:
             # NEW: Expanded parameters
             use_adx_slope_rising=params['use_adx_slope_rising'],
             use_fib_0786_only=params['use_fib_0786_only'],
-            use_liquidity_sweep_required=params['use_liquidity_sweep_required'],
             use_market_structure_bos_only=params['use_market_structure_bos_only'],
             use_atr_trailing=params['use_atr_trailing'],
             use_volatility_sizing_boost=params['use_volatility_sizing_boost'],

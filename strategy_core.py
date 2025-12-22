@@ -105,7 +105,7 @@ class StrategyParams:
     
     use_htf_filter: bool = True
     use_structure_filter: bool = True
-    use_liquidity_filter: bool = True
+    use_liquidity_filter: bool = False
     use_fib_filter: bool = True
     use_confirmation_filter: bool = True
     
