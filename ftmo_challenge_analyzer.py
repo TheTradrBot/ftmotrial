@@ -76,15 +76,23 @@ _DATA_CACHE: Dict[str, List[Dict]] = {}
 OPTUNA_STUDY_NAME = "regime_adaptive_v2_clean"
 PROGRESS_LOG_FILE = "ftmo_optimization_progress.txt"
 
-# OPTIMIZED: Rolling optimization window (last 18 months) instead of fixed dates
-# This uses recent market data and adapts to current market regimes
+# FIXED PERIODS FOR CONSISTENT BACKTESTING
+# These dates are locked to ensure reproducible results and proper train/validation splits
 TODAY = datetime.utcnow().date()
-TRAINING_END = TODAY - timedelta(days=90)  # 3 months ago for out-of-sample testing
-TRAINING_START = TRAINING_END - timedelta(days=365)  # 1 year of training data
-VALIDATION_START = TRAINING_END
-VALIDATION_END = TODAY  # Validate on most recent 3 months
+
+# TRAINING PERIOD: Full 2023 + first 9 months of 2024
+# This gives maximum in-sample data for optimization
+TRAINING_START = datetime(2023, 1, 1)
+TRAINING_END = datetime(2024, 9, 30)
+
+# VALIDATION PERIOD: Oct 2024 to present (out-of-sample test)
+# This tests robustness on unseen data
+VALIDATION_START = datetime(2024, 10, 1)
+VALIDATION_END = datetime(2025, 12, 26)
+
+# FULL PERIOD: Entire 2023-2025 for comprehensive reporting
 FULL_PERIOD_START = datetime(2023, 1, 1)
-FULL_PERIOD_END = min(datetime.now(), datetime(2025, 12, 31))
+FULL_PERIOD_END = datetime(2025, 12, 26)
 
 QUARTERS_ALL = {
     "2023_Q1": (datetime(2023, 1, 1), datetime(2023, 3, 31)),
@@ -744,7 +752,26 @@ def run_full_period_backtest(
             continue
     
     all_trades.sort(key=lambda t: str(t.entry_date))
-    return all_trades
+    
+    # CRITICAL FIX: Filter trades to only include those within the requested date range
+    # This ensures training/validation periods are isolated correctly
+    filtered_trades = []
+    for trade in all_trades:
+        entry = getattr(trade, 'entry_date', None)
+        if entry:
+            if isinstance(entry, str):
+                try:
+                    entry = datetime.fromisoformat(entry.replace("Z", "+00:00"))
+                except:
+                    continue
+            if hasattr(entry, 'replace') and entry.tzinfo:
+                entry = entry.replace(tzinfo=None)
+            
+            # Check if trade entry_date is within the requested period
+            if start_date <= entry <= end_date:
+                filtered_trades.append(trade)
+    
+    return filtered_trades
 
 
 def convert_to_backtest_trade(
@@ -1013,24 +1040,24 @@ class OptunaOptimizer:
         # ============================================================================
         # REGIME-ADAPTIVE V2 EXPANDED PARAMETER SEARCH SPACE (20+ Parameters)
         # ============================================================================
-        # LOOSENED PARAMETERS FOR BETTER TRADE GENERATION + QUARTERLY CONSISTENCY
-        # Focusing on getting 80-200 trades in training period (2023-2024-09) with positive quarterly R
+        # AGGRESSIVELY LOOSENED PARAMETERS FOR MAXIMUM TRADE GENERATION
+        # Goal: Generate 200+ trades in training period + meaningful validation trades
         params = {
-            'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.4, 0.7, step=0.05),
-            'min_confluence_score': trial.suggest_int('min_confluence_score', 3, 5),  # CRITICAL: Lower to 3-5 (was 4-6), bias toward 3
-            'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 3),     # Loosen - was 3
-            'adx_trend_threshold': trial.suggest_float('adx_trend_threshold', 18.0, 26.0, step=1.0),  # Allow lower ADX
-            'adx_range_threshold': trial.suggest_float('adx_range_threshold', 14.0, 20.0, step=1.0),
-            'trend_min_confluence': trial.suggest_int('trend_min_confluence', 4, 7),   # Allow as low as 4
-            'range_min_confluence': trial.suggest_int('range_min_confluence', 3, 6),   # Allow 3+
-            'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.5, 3.5, step=0.2),
-            'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.6, 0.95, step=0.05),
+            'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.3, 0.8, step=0.05),
+            'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 4),  # ULTRA-LOOSE: 2-4 (was 3-5)
+            'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 2),    # LOOSEN: 1-2 (was 1-3)
+            'adx_trend_threshold': trial.suggest_float('adx_trend_threshold', 15.0, 24.0, step=1.0),  # Allow much lower ADX
+            'adx_range_threshold': trial.suggest_float('adx_range_threshold', 10.0, 18.0, step=1.0),  # Allow lower range mode ADX
+            'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),   # Allow as low as 3
+            'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),   # Allow 2+
+            'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.2, 3.5, step=0.2),
+            'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
             'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', [True, False]),
-            'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.7, step=0.05),
-            'atr_min_percentile': trial.suggest_float('atr_min_percentile', 45.0, 75.0, step=5.0),  # LOOSEN from 80!
-            'trail_activation_r': trial.suggest_float('trail_activation_r', 1.5, 3.4, step=0.2),
-            'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.2, 2.0, step=0.1),
-            'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.2, step=0.1),
+            'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.8, step=0.05),
+            'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=5.0),  # AGGRESSIVELY LOOSEN!
+            'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.2),
+            'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.1),
+            'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.1),
         }
         
         training_trades = run_full_period_backtest(
