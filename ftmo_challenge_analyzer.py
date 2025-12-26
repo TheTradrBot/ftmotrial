@@ -847,11 +847,10 @@ def convert_to_backtest_trade(
     )
     lot_size = sizing_result.get("lot_size", 0.01)
     
-    spread_cost = risk_pips * 0.02
-    slippage_cost = risk_pips * 0.01
-    commission_cost = 0.001
-    adjusted_profit = profit_usd * (1 - spread_cost - slippage_cost - commission_cost)
-    
+    # Use profit_usd directly - spread/slippage already accounted for in backtest simulation
+    # The R multiple already reflects the actual trade outcome
+    adjusted_profit = profit_usd
+
     return BacktestTrade(
         trade_num=trade_num,
         symbol=trade.symbol,
@@ -1353,15 +1352,24 @@ class OptunaOptimizer:
         )
         
         existing_trials = len(study.trials)
+        previous_best_value = None  # Track previous best to detect real improvements
         if existing_trials > 0:
             print(f"Resuming from existing study with {existing_trials} completed trials")
             try:
-                if study.best_trial:
+                if study.best_trial and study.best_value is not None:
+                    previous_best_value = study.best_value
                     print(f"Current best value: {study.best_value:.0f}")
-            except ValueError:
-                print("No valid completed trials yet")
+                else:
+                    print("No best trial found yet (all trials may have failed)")
+            except (ValueError, AttributeError) as e:
+                print(f"No valid completed trials yet: {e}")
+        
+        # Store best value before optimization starts for comparison
+        best_value_before_run = previous_best_value
         
         def progress_callback(study, trial):
+            nonlocal best_value_before_run
+            
             log_optimization_progress(
                 trial_num=trial.number,
                 value=trial.value if trial.value is not None else 0,
@@ -1369,12 +1377,39 @@ class OptunaOptimizer:
                 best_params=study.best_params if study.best_trial else {}
             )
             
+            # Check if this trial is STRICTLY better than the previous best
+            is_new_best = False
+            try:
+                current_best = study.best_value if study.best_trial else None
+                if current_best is not None:
+                    if best_value_before_run is None:
+                        # First successful trial
+                        is_new_best = True
+                    elif current_best > best_value_before_run:
+                        # Strictly better than before
+                        is_new_best = True
+                    
+                    # Update best_value_before_run for next comparison
+                    if is_new_best:
+                        best_value_before_run = current_best
+            except (ValueError, AttributeError):
+                pass
+            
             quarterly_stats = trial.user_attrs.get('quarterly_stats', {})
             overall_stats = trial.user_attrs.get('overall_stats', {})
             
-            print(f"\n{'─'*70}")
-            print(f"TRIAL #{trial.number} COMPLETE | Score: {trial.value:.0f} | Best: {study.best_value:.0f}")
-            print(f"{'─'*70}")
+            # Display current best value
+            try:
+                current_best = study.best_value if study.best_trial else "N/A"
+                print(f"\n{'─'*70}")
+                print(f"TRIAL #{trial.number} COMPLETE | Score: {trial.value:.0f} | Best: {current_best}")
+                if is_new_best:
+                    print(f"🎯 NEW BEST TRIAL FOUND! Updating CSV exports and best_params.json")
+                print(f"{'─'*70}")
+            except (ValueError, AttributeError):
+                print(f"\n{'─'*70}")
+                print(f"TRIAL #{trial.number} COMPLETE | Score: {trial.value:.0f}")
+                print(f"{'─'*70}")
             
             if quarterly_stats:
                 print(f"{'Quarter':<10} {'Trades':>8} {'Wins':>6} {'Win%':>8} {'R-Total':>10} {'Profit $':>12}")
@@ -1393,6 +1428,128 @@ class OptunaOptimizer:
                 print("  No trades generated for this trial")
             
             print(f"{'─'*70}\n")
+            
+            # If this is the new best trial, immediately export CSVs and update best_params.json
+            if is_new_best and study.best_trial:
+                try:
+                    print(f"\n📊 Exporting updated CSV files for best trial #{trial.number}...")
+                    
+                    # Get best params
+                    current_best_params = study.best_params
+                    risk_pct = current_best_params.get('risk_per_trade_pct', 0.5)
+                    
+                    # Run backtests with best params to get trades
+                    print("  Running training backtest...")
+                    training_trades_best = run_full_period_backtest(
+                        start_date=TRAINING_START,
+                        end_date=TRAINING_END,
+                        min_confluence=current_best_params.get('min_confluence_score', 3),
+                        min_quality_factors=current_best_params.get('min_quality_factors', 2),
+                        risk_per_trade_pct=risk_pct,
+                        atr_min_percentile=current_best_params.get('atr_min_percentile', 60.0),
+                        trail_activation_r=current_best_params.get('trail_activation_r', 2.2),
+                        december_atr_multiplier=current_best_params.get('december_atr_multiplier', 1.5),
+                        volatile_asset_boost=current_best_params.get('volatile_asset_boost', 1.5),
+                        ml_min_prob=None,
+                        require_adx_filter=True,
+                        adx_trend_threshold=current_best_params.get('adx_trend_threshold', 25.0),
+                        adx_range_threshold=current_best_params.get('adx_range_threshold', 20.0),
+                        trend_min_confluence=current_best_params.get('trend_min_confluence', 6),
+                        range_min_confluence=current_best_params.get('range_min_confluence', 5),
+                        rsi_oversold_range=current_best_params.get('rsi_oversold_range', 25.0),
+                        rsi_overbought_range=current_best_params.get('rsi_overbought_range', 75.0),
+                        atr_volatility_ratio=current_best_params.get('atr_volatility_ratio', 0.8),
+                        atr_trail_multiplier=current_best_params.get('atr_trail_multiplier', 1.5),
+                        partial_exit_at_1r=current_best_params.get('partial_exit_at_1r', True),
+                    )
+                    
+                    print("  Running validation backtest...")
+                    validation_trades_best = run_full_period_backtest(
+                        start_date=VALIDATION_START,
+                        end_date=VALIDATION_END,
+                        min_confluence=current_best_params.get('min_confluence_score', 3),
+                        min_quality_factors=current_best_params.get('min_quality_factors', 2),
+                        risk_per_trade_pct=risk_pct,
+                        atr_min_percentile=current_best_params.get('atr_min_percentile', 60.0),
+                        trail_activation_r=current_best_params.get('trail_activation_r', 2.2),
+                        december_atr_multiplier=current_best_params.get('december_atr_multiplier', 1.5),
+                        volatile_asset_boost=current_best_params.get('volatile_asset_boost', 1.5),
+                        ml_min_prob=None,
+                        require_adx_filter=True,
+                        adx_trend_threshold=current_best_params.get('adx_trend_threshold', 25.0),
+                        adx_range_threshold=current_best_params.get('adx_range_threshold', 20.0),
+                        trend_min_confluence=current_best_params.get('trend_min_confluence', 6),
+                        range_min_confluence=current_best_params.get('range_min_confluence', 5),
+                        rsi_oversold_range=current_best_params.get('rsi_oversold_range', 25.0),
+                        rsi_overbought_range=current_best_params.get('rsi_overbought_range', 75.0),
+                        atr_volatility_ratio=current_best_params.get('atr_volatility_ratio', 0.8),
+                        atr_trail_multiplier=current_best_params.get('atr_trail_multiplier', 1.5),
+                        partial_exit_at_1r=current_best_params.get('partial_exit_at_1r', True),
+                    )
+                    
+                    print("  Running full period backtest...")
+                    full_trades_best = run_full_period_backtest(
+                        start_date=FULL_PERIOD_START,
+                        end_date=FULL_PERIOD_END,
+                        min_confluence=current_best_params.get('min_confluence_score', 3),
+                        min_quality_factors=current_best_params.get('min_quality_factors', 2),
+                        risk_per_trade_pct=risk_pct,
+                        atr_min_percentile=current_best_params.get('atr_min_percentile', 60.0),
+                        trail_activation_r=current_best_params.get('trail_activation_r', 2.2),
+                        december_atr_multiplier=current_best_params.get('december_atr_multiplier', 1.5),
+                        volatile_asset_boost=current_best_params.get('volatile_asset_boost', 1.5),
+                        ml_min_prob=None,
+                        require_adx_filter=True,
+                        adx_trend_threshold=current_best_params.get('adx_trend_threshold', 25.0),
+                        adx_range_threshold=current_best_params.get('adx_range_threshold', 20.0),
+                        trend_min_confluence=current_best_params.get('trend_min_confluence', 6),
+                        range_min_confluence=current_best_params.get('range_min_confluence', 5),
+                        rsi_oversold_range=current_best_params.get('rsi_oversold_range', 25.0),
+                        rsi_overbought_range=current_best_params.get('rsi_overbought_range', 75.0),
+                        atr_volatility_ratio=current_best_params.get('atr_volatility_ratio', 0.8),
+                        atr_trail_multiplier=current_best_params.get('atr_trail_multiplier', 1.5),
+                        partial_exit_at_1r=current_best_params.get('partial_exit_at_1r', True),
+                    )
+                    
+                    # Export updated CSV files
+                    print("  Exporting all_trades_jan_dec_2024.csv...")
+                    export_trades_to_csv(training_trades_best, "all_trades_jan_dec_2024.csv", risk_pct)
+                    
+                    print("  Exporting all_trades_2024_full.csv...")
+                    export_trades_to_csv(validation_trades_best, "all_trades_2024_full.csv", risk_pct)
+                    
+                    print("  Exporting all_trades_2023_2025_full.csv...")
+                    export_trades_to_csv(full_trades_best, "all_trades_2023_2025_full.csv", risk_pct)
+                    
+                    # Save best_params.json immediately for live bot
+                    params_to_save = {
+                        'min_confluence': current_best_params.get('min_confluence_score', 5),
+                        'min_quality_factors': current_best_params.get('min_quality_factors', 2),
+                        'risk_per_trade_pct': current_best_params.get('risk_per_trade_pct', 0.5),
+                        'atr_min_percentile': current_best_params.get('atr_min_percentile', 75.0),
+                        'trail_activation_r': current_best_params.get('trail_activation_r', 2.2),
+                        'december_atr_multiplier': current_best_params.get('december_atr_multiplier', 1.5),
+                        'volatile_asset_boost': current_best_params.get('volatile_asset_boost', 1.5),
+                        'adx_trend_threshold': current_best_params.get('adx_trend_threshold', 25.0),
+                        'adx_range_threshold': current_best_params.get('adx_range_threshold', 20.0),
+                        'trend_min_confluence': current_best_params.get('trend_min_confluence', 6),
+                        'range_min_confluence': current_best_params.get('range_min_confluence', 5),
+                        'rsi_oversold_range': current_best_params.get('rsi_oversold_range', 25.0),
+                        'rsi_overbought_range': current_best_params.get('rsi_overbought_range', 75.0),
+                        'atr_volatility_ratio': current_best_params.get('atr_vol_ratio_range', 0.8),
+                        'atr_trail_multiplier': current_best_params.get('atr_trail_multiplier', 1.5),
+                        'partial_exit_at_1r': current_best_params.get('partial_exit_at_1r', True),
+                        'use_adx_slope_rising': current_best_params.get('use_adx_slope_rising', False),
+                        'partial_exit_pct': current_best_params.get('partial_exit_pct', 0.5),
+                    }
+                    
+                    print("  Saving best_params.json for live bot...")
+                    save_optimized_params(params_to_save, backup=True)
+                    
+                    print(f"✅ Updated CSV exports and best_params.json for trial #{trial.number}\n")
+                    
+                except Exception as e:
+                    print(f"⚠️  Error exporting CSVs for best trial: {e}\n")
         
         study.optimize(
             self._objective,
@@ -1503,11 +1660,13 @@ def generate_summary_txt(
     
     # Calculate account size and risk per trade for USD conversion
     account_size = 200000.0  # FTMO 200K account
-    risk_per_trade_pct = best_params.get('risk_per_trade_pct', 0.005)
+    # risk_per_trade_pct is stored as 0.5 meaning 0.5%, so divide by 100
+    risk_per_trade_pct = best_params.get('risk_per_trade_pct', 0.5)
+    risk_per_trade_decimal = risk_per_trade_pct / 100  # 0.5% -> 0.005
     
-    training_profit_usd = training_stats['total_r'] * risk_per_trade_pct * account_size
-    validation_profit_usd = validation_stats['total_r'] * risk_per_trade_pct * account_size
-    full_profit_usd = full_stats['total_r'] * risk_per_trade_pct * account_size
+    training_profit_usd = training_stats['total_r'] * risk_per_trade_decimal * account_size
+    validation_profit_usd = validation_stats['total_r'] * risk_per_trade_decimal * account_size
+    full_profit_usd = full_stats['total_r'] * risk_per_trade_decimal * account_size
     
     lines.extend([
         "",
@@ -1561,7 +1720,7 @@ def generate_summary_txt(
         q_wr = (q_wins / len(q_filtered) * 100) if q_filtered else 0
         
         # Calculate USD profit for this quarter
-        q_profit_usd = q_r * risk_per_trade_pct * account_size
+        q_profit_usd = q_r * risk_per_trade_decimal * account_size
         total_full_period_profit_usd += q_profit_usd
         
         lines.append(f"  {q_name}: {len(q_filtered)} trades, {q_r:+.1f}R, {q_wr:.0f}% win rate, ${q_profit_usd:+,.2f}")
@@ -1731,7 +1890,13 @@ def main():
     )
     
     risk_pct = best_params.get('risk_per_trade_pct', 0.5)
+    
+    # Export all three CSV files at the end
+    print("\n📊 Exporting final CSV files...")
+    export_trades_to_csv(training_trades, "all_trades_jan_dec_2024.csv", risk_pct)
+    export_trades_to_csv(validation_trades, "all_trades_2024_full.csv", risk_pct)
     export_trades_to_csv(full_year_trades, "all_trades_2023_2025_full.csv", risk_pct)
+    print("✅ All CSV files exported successfully\n")
     
     full_year_results = print_period_results(
         full_year_trades, f"FULL PERIOD FINAL RESULTS ({FULL_PERIOD_START.year}-{FULL_PERIOD_END.year})",
