@@ -2322,6 +2322,7 @@ def main():
       python ftmo_challenge_analyzer.py --config     # Show current configuration
       python ftmo_challenge_analyzer.py --trials 100 # Run 100 trials
       python ftmo_challenge_analyzer.py --multi      # Use NSGA-II multi-objective optimization
+      python ftmo_challenge_analyzer.py --single     # Use TPE single-objective optimization
       python ftmo_challenge_analyzer.py --adx        # Enable ADX regime filtering
     """
     parser = argparse.ArgumentParser(
@@ -2342,6 +2343,11 @@ def main():
         "--multi",
         action="store_true",
         help="Use NSGA-II multi-objective optimization (Profit + Sharpe + WinRate)"
+    )
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Use TPE single-objective optimization (composite score)"
     )
     parser.add_argument(
         "--patience",
@@ -2374,9 +2380,28 @@ def main():
     
     # CLI args override config file settings
     n_trials = args.trials
-    use_multi_objective = args.multi or config.use_multi_objective
+    
+    # Handle --multi and --single flags (mutually exclusive override)
+    if args.multi and args.single:
+        print("❌ ERROR: Cannot use both --multi and --single flags simultaneously")
+        return
+    
+    if args.multi:
+        use_multi_objective = True  # Explicit NSGA-II
+    elif args.single:
+        use_multi_objective = False  # Explicit TPE
+    else:
+        use_multi_objective = config.use_multi_objective  # Use config default
+    
     use_adx_regime = args.adx or config.use_adx_regime_filter
     early_stopping_patience = args.patience
+    
+    # Set optimization mode for output directory structure
+    optimization_mode = "NSGA" if use_multi_objective else "TPE"
+    
+    # Initialize output manager with correct mode BEFORE any optimization runs
+    from tradr.utils.output_manager import set_output_manager
+    set_output_manager(optimization_mode=optimization_mode)
 
     print(f"\n{'='*80}")
     print("FTMO PROFESSIONAL OPTIMIZATION SYSTEM - UNIFIED CONFIG V3")
@@ -2386,6 +2411,7 @@ def main():
     print(f"\n📋 Configuration (from params/optimization_config.json):")
     print(f"  Database: {config.db_path}")
     print(f"  Study: {config.study_name}")
+    print(f"  Output Directory: ftmo_analysis_output/{optimization_mode}/")
     print(f"  Multi-objective: {'✅ Enabled' if use_multi_objective else '❌ Disabled'}")
     print(f"  ADX Regime Filter: {'✅ Enabled' if use_adx_regime else '❌ Disabled'}")
     

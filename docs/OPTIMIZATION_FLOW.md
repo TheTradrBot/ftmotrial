@@ -57,8 +57,9 @@ This document describes the optimized NSGA-II flow that combines speed with robu
 
 ## Usage
 
+### NSGA-II Multi-Objective (Recommended for FTMO)
 ```bash
-# Default: NSGA-II with smart validation
+# Default: NSGA-II with smart validation (outputs to ftmo_analysis_output/NSGA/)
 python ftmo_challenge_analyzer.py --multi --trials 100
 
 # With ADX regime filtering enabled
@@ -66,4 +67,34 @@ python ftmo_challenge_analyzer.py --multi --adx --trials 100
 
 # Background run
 nohup python ftmo_challenge_analyzer.py --multi --adx --trials 200 > opt.log 2>&1 &
+```
+
+### TPE Single-Objective (Faster, simpler scoring)
+```bash
+# TPE optimization (outputs to ftmo_analysis_output/TPE/)
+python ftmo_challenge_analyzer.py --single --trials 100
+
+# With ADX regime filtering
+python ftmo_challenge_analyzer.py --single --adx --trials 100
+```
+
+### Output Structure
+```
+ftmo_analysis_output/
+├── NSGA/                          # Multi-objective runs
+│   ├── optimization.log           # Real-time NSGA-II progress
+│   ├── best_trades_training.csv
+│   ├── best_trades_validation.csv
+│   ├── best_trades_final.csv
+│   ├── monthly_stats.csv
+│   ├── symbol_performance.csv
+│   └── optimization_report.csv
+└── TPE/                           # Single-objective runs
+    ├── optimization.log           # Real-time TPE progress
+    ├── best_trades_training.csv
+    ├── best_trades_validation.csv
+    ├── best_trades_final.csv
+    ├── monthly_stats.csv
+    ├── symbol_performance.csv
+    └── optimization_report.csv
 ```

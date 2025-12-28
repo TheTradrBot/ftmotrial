@@ -69,10 +69,16 @@ python ftmo_challenge_analyzer.py --status    # Check progress
 python ftmo_challenge_analyzer.py --config    # Show current configuration
 python ftmo_challenge_analyzer.py --trials 100  # Set trial count
 python ftmo_challenge_analyzer.py --multi     # Use NSGA-II multi-objective
+python ftmo_challenge_analyzer.py --single    # Use TPE single-objective
 python ftmo_challenge_analyzer.py --adx       # Enable ADX regime filtering
 ```
 Uses Optuna with SQLite storage (`ftmo_optimization.db`) for crash-resistant optimization.
 Configuration loaded from `params/optimization_config.json`.
+
+**Output Structure:**
+- NSGA-II runs: `ftmo_analysis_output/NSGA/`
+- TPE runs: `ftmo_analysis_output/TPE/`
+- Each mode has its own optimization.log and CSV files
 
 ### Run Live Bot (Windows VM only)
 ```bash

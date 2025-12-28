@@ -32,8 +32,9 @@ from typing import List, Dict, Any, Optional
 import pandas as pd
 
 
-OUTPUT_DIR = Path("ftmo_analysis_output")
-OUTPUT_DIR.mkdir(exist_ok=True)
+# Base output directory - subdirectories created per optimization mode
+BASE_OUTPUT_DIR = Path("ftmo_analysis_output")
+BASE_OUTPUT_DIR.mkdir(exist_ok=True)
 
 
 @dataclass
@@ -72,11 +73,25 @@ class OutputManager:
     - Monthly statistics breakdown
     - Symbol performance analysis
     - Final optimization report
+    - Separate directories for NSGA-II vs TPE runs
     """
     
-    def __init__(self, output_dir: Path = OUTPUT_DIR):
-        self.output_dir = output_dir
-        self.output_dir.mkdir(exist_ok=True)
+    def __init__(self, output_dir: Path = None, optimization_mode: str = "NSGA"):
+        """
+        Initialize OutputManager.
+        
+        Args:
+            output_dir: Custom output directory (optional)
+            optimization_mode: "NSGA" or "TPE" - creates subdirectory in ftmo_analysis_output/
+        """
+        if output_dir is None:
+            # Create mode-specific subdirectory: ftmo_analysis_output/NSGA/ or ftmo_analysis_output/TPE/
+            self.output_dir = BASE_OUTPUT_DIR / optimization_mode
+        else:
+            self.output_dir = output_dir
+        
+        self.output_dir.mkdir(exist_ok=True, parents=True)
+        self.optimization_mode = optimization_mode
         
         # File paths
         self.log_file = self.output_dir / "optimization.log"
@@ -100,7 +115,7 @@ class OutputManager:
         if not self.log_file.exists():
             with open(self.log_file, 'w') as f:
                 f.write("=" * 80 + "\n")
-                f.write("FTMO OPTIMIZATION LOG\n")
+                f.write(f"FTMO OPTIMIZATION LOG - {self.optimization_mode}\n")
                 f.write(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write("=" * 80 + "\n\n")
     
@@ -497,12 +512,28 @@ class OutputManager:
 _output_manager: Optional[OutputManager] = None
 
 
-def get_output_manager() -> OutputManager:
-    """Get the global OutputManager instance."""
+def get_output_manager(optimization_mode: str = "NSGA") -> OutputManager:
+    """
+    Get the global OutputManager instance.
+    
+    Args:
+        optimization_mode: "NSGA" or "TPE" - determines subdirectory
+    """
     global _output_manager
     if _output_manager is None:
-        _output_manager = OutputManager()
+        _output_manager = OutputManager(optimization_mode=optimization_mode)
     return _output_manager
+
+
+def set_output_manager(optimization_mode: str = "NSGA"):
+    """
+    Explicitly set/reset the global OutputManager with specific mode.
+    
+    Args:
+        optimization_mode: "NSGA" or "TPE"
+    """
+    global _output_manager
+    _output_manager = OutputManager(optimization_mode=optimization_mode)
 
 
 if __name__ == "__main__":
