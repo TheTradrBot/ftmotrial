@@ -1069,26 +1069,44 @@ class OptunaOptimizer:
         - Partial profit taking and trail management
         """
         # ============================================================================
-        # REGIME-ADAPTIVE V2 EXPANDED PARAMETER SEARCH SPACE (20+ Parameters)
+        # REGIME-ADAPTIVE V3 EXPANDED PARAMETER SEARCH SPACE (25+ Parameters)
         # ============================================================================
-        # AGGRESSIVELY LOOSENED PARAMETERS FOR MAXIMUM TRADE GENERATION
-        # Goal: Generate 200+ trades in training period + meaningful validation trades
+        # EXPANDED RANGES FOR MAXIMUM EXPLORATION
+        # All step values are now divisible by range to avoid Optuna warnings
         params = {
-            'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.3, 0.8, step=0.05),
-            'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 4),  # ULTRA-LOOSE: 2-4 (was 3-5)
-            'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 2),    # LOOSEN: 1-2 (was 1-3)
-            'adx_trend_threshold': trial.suggest_float('adx_trend_threshold', 15.0, 24.0, step=1.0),  # Allow much lower ADX
-            'adx_range_threshold': trial.suggest_float('adx_range_threshold', 10.0, 18.0, step=1.0),  # Allow lower range mode ADX
-            'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),   # Allow as low as 3
-            'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),   # Allow 2+
-            'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.2, 3.5, step=0.2),
-            'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
+            # Core Risk Management
+            'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.2, 1.0, step=0.1),  # Expanded: 0.2-1.0%
+            'max_concurrent_trades': trial.suggest_int('max_concurrent_trades', 3, 10),  # NEW: Position limit
+            
+            # Confluence Thresholds
+            'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 6),  # Full range
+            'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 3),
+            
+            # ADX Regime Detection
+            'adx_trend_threshold': trial.suggest_int('adx_trend_threshold', 18, 30),  # Int to avoid step issues
+            'adx_range_threshold': trial.suggest_int('adx_range_threshold', 12, 22),
+            'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),
+            'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),
+            
+            # ATR-based Parameters (fixed step divisibility)
+            'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.0, 3.0, step=0.25),  # Fixed: (3.0-1.0)/0.25=8
+            'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.1),   # Fixed: (1.0-0.5)/0.1=5
+            'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=10.0),  # Fixed: (70-30)/10=4
+            'atr_sl_multiplier': trial.suggest_float('atr_sl_multiplier', 1.0, 2.5, step=0.25),     # NEW: SL distance
+            
+            # Partial Exit Strategy
             'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', [True, False]),
-            'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.8, step=0.05),
-            'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=5.0),  # AGGRESSIVELY LOOSEN!
-            'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.2),
-            'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.1),
-            'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.1),
+            'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.25, 0.75, step=0.1),     # Fixed: (0.75-0.25)/0.1=5
+            'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.5),   # Fixed: (3.0-1.0)/0.5=4
+            
+            # Seasonality Adjustments
+            'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.2),  # Fixed: (2.0-1.0)/0.2=5
+            'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.2),       # Fixed: (2.0-1.0)/0.2=5
+            'summer_risk_multiplier': trial.suggest_float('summer_risk_multiplier', 0.4, 1.0, step=0.2),   # NEW: Q3 seasonality
+            
+            # Fibonacci Zone (NEW)
+            'fib_zone_low': trial.suggest_float('fib_zone_low', 0.5, 0.65, step=0.05),   # NEW: Golden pocket low
+            'fib_zone_high': trial.suggest_float('fib_zone_high', 0.75, 0.9, step=0.05), # NEW: Golden pocket high
         }
         
         training_trades = run_full_period_backtest(
@@ -1996,23 +2014,44 @@ def multi_objective_function(trial) -> Tuple[float, float, float]:
     
     All three should be MAXIMIZED (Optuna NSGA-II handles this).
     """
-    # Sample hyperparameters (same as single-objective)
+    # ============================================================================
+    # NSGA-II EXPANDED PARAMETER SPACE (25+ Parameters)
+    # All step values verified for divisibility to avoid Optuna warnings
+    # ============================================================================
     params = {
+        # Core Risk Management
+        'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.2, 1.0, step=0.1),
+        'max_concurrent_trades': trial.suggest_int('max_concurrent_trades', 3, 10),
+        
+        # Confluence Thresholds
         'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 6),
-        'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 4),
-        'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.3, 0.6, step=0.05),
-        'atr_min_percentile': trial.suggest_float('atr_min_percentile', 40.0, 80.0, step=5.0),
-        'trail_activation_r': trial.suggest_float('trail_activation_r', 0.8, 2.0, step=0.2),
-        'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.2),
-        'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 1.5, step=0.1),
-        'adx_trend_threshold': trial.suggest_int('adx_trend_threshold', 15, 30),
-        'adx_range_threshold': trial.suggest_int('adx_range_threshold', 10, 25),
-        'trend_min_confluence': trial.suggest_int('trend_min_confluence', 2, 5),
+        'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 3),
+        
+        # ADX Regime Detection
+        'adx_trend_threshold': trial.suggest_int('adx_trend_threshold', 18, 30),
+        'adx_range_threshold': trial.suggest_int('adx_range_threshold', 12, 22),
+        'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),
         'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),
-        'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
-        'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.2, 3.5, step=0.2),
+        
+        # ATR-based Parameters (fixed step divisibility)
+        'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.0, 3.0, step=0.25),
+        'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.1),
+        'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=10.0),
+        'atr_sl_multiplier': trial.suggest_float('atr_sl_multiplier', 1.0, 2.5, step=0.25),
+        
+        # Partial Exit Strategy
         'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', [True, False]),
-        'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.8, step=0.05),
+        'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.25, 0.75, step=0.1),
+        'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.5),
+        
+        # Seasonality Adjustments
+        'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.2),
+        'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.2),
+        'summer_risk_multiplier': trial.suggest_float('summer_risk_multiplier', 0.4, 1.0, step=0.2),
+        
+        # Fibonacci Zone
+        'fib_zone_low': trial.suggest_float('fib_zone_low', 0.5, 0.65, step=0.05),
+        'fib_zone_high': trial.suggest_float('fib_zone_high', 0.75, 0.9, step=0.05),
     }
     
     risk_pct = params['risk_per_trade_pct']
