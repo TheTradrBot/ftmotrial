@@ -7,11 +7,6 @@ SYMBOL FORMATS:
 - Examples: EUR_USD, XAU_USD, SPX500_USD
 - These are converted to broker format (EURUSD, XAUUSD, US500.cash) via symbol_mapping.py
 - Conversion happens automatically in main_live_bot.py using the symbol_map
-
-DATA SOURCES:
-- Forex pairs: OANDA Practice API (68 pairs available)
-- Metals, Indices, Crypto: Yahoo Finance (yfinance) - FREE, no API key
-  - See scripts/download_yahoo_data.py for historical data download
 """
 
 import os
@@ -83,18 +78,12 @@ CONTRACT_SPECS = {
     "CAD_JPY": {"pip_value": 0.01, "contract_size": 100000, "pip_location": 2},
     "CAD_CHF": {"pip_value": 0.0001, "contract_size": 100000, "pip_location": 4},
     "CHF_JPY": {"pip_value": 0.01, "contract_size": 100000, "pip_location": 2},
-    
-    # === Metals (data from Yahoo Finance) ===
-    "XAU_USD": {"pip_value": 0.01, "contract_size": 100, "pip_location": 2},     # Gold: $0.01 per pip, 100 oz contract
-    "XAG_USD": {"pip_value": 0.001, "contract_size": 5000, "pip_location": 3},   # Silver: $0.001 per pip, 5000 oz contract
-    
-    # === Indices (data from Yahoo Finance) ===
-    "SPX500_USD": {"pip_value": 0.1, "contract_size": 1, "pip_location": 1},     # S&P 500: 0.1 point = 1 pip
-    "NAS100_USD": {"pip_value": 0.1, "contract_size": 1, "pip_location": 1},     # Nasdaq 100: 0.1 point = 1 pip
-    
-    # === Crypto (data from Yahoo Finance) ===
-    "BTC_USD": {"pip_value": 1.0, "contract_size": 1, "pip_location": 0},        # Bitcoin: $1 = 1 pip
-    "ETH_USD": {"pip_value": 0.01, "contract_size": 1, "pip_location": 2},       # Ethereum: $0.01 = 1 pip
+    "XAU_USD": {"pip_value": 0.01, "contract_size": 100, "pip_location": 2},
+    "XAG_USD": {"pip_value": 0.001, "contract_size": 5000, "pip_location": 3},
+    "BTC_USD": {"pip_value": 1.0, "contract_size": 1, "pip_location": 0},
+    "ETH_USD": {"pip_value": 0.01, "contract_size": 1, "pip_location": 2},
+    "SPX500_USD": {"pip_value": 1.0, "contract_size": 1, "pip_location": 0},
+    "NAS100_USD": {"pip_value": 1.0, "contract_size": 1, "pip_location": 0},
 }
 
 
@@ -125,61 +114,52 @@ GRANULARITY_MAP = {
 
 
 # ==== Instruments & groups ====
-# All available OANDA Practice instruments (68 forex pairs)
-# Note: OANDA Practice only has CURRENCY pairs - no metals, indices, or crypto
+# All available OANDA instruments
 
+# OANDA FX pairs - Majors and Crosses only
 FOREX_PAIRS = [
-    # === G10 Majors ===
-    "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "USD_CAD", "AUD_USD", "NZD_USD",
+    # Majors
+    "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF",
+    "USD_CAD", "AUD_USD", "NZD_USD",
+
+    # EUR crosses
+    "EUR_GBP", "EUR_JPY", "EUR_CHF", "EUR_AUD",
+    "EUR_CAD", "EUR_NZD",
+
+    # GBP crosses
+    "GBP_JPY", "GBP_CHF", "GBP_AUD", "GBP_CAD",
+    "GBP_NZD",
+
+    # AUD / NZD / CAD / CHF / JPY crosses
+    "AUD_JPY", "AUD_CHF", "AUD_CAD", "AUD_NZD",
+    "NZD_JPY", "NZD_CHF", "NZD_CAD",
+    "CAD_JPY", "CAD_CHF", "CHF_JPY",
     
-    # === EUR Crosses ===
-    "EUR_AUD", "EUR_CAD", "EUR_CHF", "EUR_CZK", "EUR_DKK", "EUR_GBP", "EUR_HKD",
-    "EUR_HUF", "EUR_JPY", "EUR_NOK", "EUR_NZD", "EUR_PLN", "EUR_SEK", "EUR_SGD",
-    "EUR_TRY", "EUR_ZAR",
-    
-    # === GBP Crosses ===
-    "GBP_AUD", "GBP_CAD", "GBP_CHF", "GBP_HKD", "GBP_JPY", "GBP_NZD", "GBP_PLN",
-    "GBP_SGD", "GBP_ZAR",
-    
-    # === AUD Crosses ===
-    "AUD_CAD", "AUD_CHF", "AUD_HKD", "AUD_JPY", "AUD_NZD", "AUD_SGD",
-    
-    # === NZD Crosses ===
-    "NZD_CAD", "NZD_CHF", "NZD_HKD", "NZD_JPY", "NZD_SGD",
-    
-    # === CAD Crosses ===
-    "CAD_CHF", "CAD_HKD", "CAD_JPY", "CAD_SGD",
-    
-    # === CHF Crosses ===
-    "CHF_HKD", "CHF_JPY", "CHF_ZAR",
-    
-    # === USD Exotic Crosses ===
-    "USD_CNH", "USD_CZK", "USD_DKK", "USD_HKD", "USD_HUF", "USD_MXN", "USD_NOK",
-    "USD_PLN", "USD_SEK", "USD_SGD", "USD_THB", "USD_TRY", "USD_ZAR",
-    
-    # === Other Exotic Crosses ===
-    "HKD_JPY", "SGD_CHF", "SGD_JPY", "TRY_JPY", "ZAR_JPY",
+    # High volatility pairs (OPTIMIZED: Added for more setups daily)
+    "GBP_JPY",  # Yen crosses for volatility
+    "NZD_JPY",
+    "AUD_NZD",  # Commodity currency crosses
 ]
 
-# === NON-FOREX ASSETS (data from Yahoo Finance, not OANDA) ===
-# These use Yahoo Finance for historical data and live quotes
-
-# Metals - using futures data from Yahoo Finance
+# Metals (FTMO tradable)
 METALS = [
-    "XAU_USD",  # Gold (GC=F futures on Yahoo)
-    "XAG_USD",  # Silver (SI=F futures on Yahoo)
+    "XAU_USD",  # Gold (XAUUSD on FTMO)
+    "XAG_USD",  # Silver (XAGUSD on FTMO)
 ]
 
-# Indices - using E-mini futures from Yahoo Finance
+# Indices (FTMO tradable)
 INDICES = [
-    "SPX500_USD",  # S&P 500 E-mini (ES=F on Yahoo)
-    "NAS100_USD",  # Nasdaq 100 E-mini (NQ=F on Yahoo)
+    "SPX500_USD",  # S&P 500 (US500 on FTMO)
+    "NAS100_USD",  # Nasdaq 100 (US100 on FTMO) - High volatility
+    "UK100_USD",   # FTSE 100 (OPTIMIZED: Added for diversity)
 ]
 
-# Crypto - from Yahoo Finance
+# Crypto (FTMO tradable)
 CRYPTO_ASSETS = [
-    "BTC_USD",  # Bitcoin (BTC-USD on Yahoo)
-    "ETH_USD",  # Ethereum (ETH-USD on Yahoo)
+    "BTC_USD",   # Bitcoin (BTCUSD on FTMO) - High volatility
+    "ETH_USD",   # Ethereum (ETHUSD on FTMO) - High volatility
+    "XRP_USD",   # Ripple (OPTIMIZED: Added for more entries)
+    "ADA_USD",   # Cardano (OPTIMIZED: Added for diversity)
 ]
 
 # Convenience groups

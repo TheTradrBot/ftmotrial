@@ -242,6 +242,8 @@ class OutputManager:
         max_drawdown_pct: float = 0.0,
         val_metrics: Optional[Dict] = None,
         final_metrics: Optional[Dict] = None,
+        ftmo_dd_pct: Optional[float] = None,
+        ftmo_challenge_passed: Optional[bool] = None,
     ) -> bool:
         """
         Log a trial result to log file. Returns True if this is a new best.
@@ -281,6 +283,10 @@ class OutputManager:
             f.write(f"  Score: {score:.2f} | R: {total_r:+.1f} | Sharpe: {sharpe_ratio:.3f}\n")
             f.write(f"  Win Rate: {win_rate:.1f}% | PF: {profit_factor:.2f} | Trades: {total_trades}\n")
             f.write(f"  Profit: ${profit_usd:,.2f} | Max DD: {max_drawdown_pct:.2f}%\n")
+
+            if ftmo_dd_pct is not None:
+                status = "PASS" if ftmo_challenge_passed else "FAIL"
+                f.write(f"  FTMO DD: {ftmo_dd_pct:.1f}% | Challenge: {status}\n")
             
             if val_metrics:
                 f.write(f"  [Validation] R: {val_metrics['total_r']:+.1f} | ")

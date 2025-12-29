@@ -124,7 +124,6 @@ def calculate_risk_metrics(trades: List[Any],
     running_max = np.maximum.accumulate(cumulative_returns)
     drawdown = running_max - cumulative_returns
     max_drawdown = np.max(drawdown) if len(drawdown) > 0 else 0
-    max_drawdown_pct = (max_drawdown / account_size) * 100  # Convert to percentage for Calmar
     
     # Drawdown duration
     max_dd_idx = np.argmax(drawdown)
@@ -154,10 +153,10 @@ def calculate_risk_metrics(trades: List[Any],
     else:
         sortino = 0
     
-    # Calmar ratio (annualized return % / max drawdown %)
-    calmar = (annual_return / max_drawdown_pct) if max_drawdown_pct > 0 else 0
+    # Calmar ratio (return / max drawdown)
+    calmar = (annual_return / max_drawdown) if max_drawdown > 0 else 0
     
-    # Recovery factor (total return / max drawdown, both in USD)
+    # Recovery factor
     recovery_factor = (total_return / max_drawdown) if max_drawdown > 0 else 0
     
     # Consecutive winners/losers
@@ -193,7 +192,7 @@ def calculate_risk_metrics(trades: List[Any],
     max_consecutive_losses = max(consecutive_losses) if consecutive_losses else 0
     
     return RiskMetrics(
-        total_return=total_return,  # In USD, not percentage
+        total_return=total_return_pct,
         annual_return=annual_return,
         sharpe_ratio=sharpe,
         sortino_ratio=sortino,

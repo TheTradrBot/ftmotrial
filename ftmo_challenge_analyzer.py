@@ -27,18 +27,12 @@ import json
 import csv
 import os
 import random
-import signal
-import sys
 import numpy as np
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Union
 import pandas as pd
-
-# Force unbuffered output for better logging in nohup
-sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
-sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
 
 from strategy_core import (
     StrategyParams,
@@ -60,8 +54,6 @@ from ftmo_config import FTMO_CONFIG, FTMO10KConfig, get_pip_size, get_sl_limits
 from config import FOREX_PAIRS, METALS, INDICES, CRYPTO_ASSETS
 from tradr.risk.position_sizing import calculate_lot_size, get_contract_specs
 from params.params_loader import save_optimized_params
-from params.optimization_config import get_optimization_config, OptimizationConfig
-from tradr.utils.output_manager import OutputManager, get_output_manager
 
 # Professional Quant Suite Integration
 from professional_quant_suite import (
@@ -71,6 +63,8 @@ from professional_quant_suite import (
     ParameterSensitivityAnalyzer,
     generate_professional_report,
 )
+
+from tradr.utils.output_manager import get_output_manager, set_output_manager
 
 OUTPUT_DIR = Path("ftmo_analysis_output")
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -87,19 +81,11 @@ def save_best_params_persistent(best_params: Dict) -> None:
     except Exception as e:
         print(f"[!] Error saving best_params.json: {e}")
 
-# ============================================================================
-# UNIFIED OPTIMIZATION CONFIG - Single source of truth
-# All database paths, study names, and feature toggles are now in:
-#   params/optimization_config.json
-# ============================================================================
-OPT_CONFIG = get_optimization_config()
-
-# Legacy constants for backwards compatibility - now derived from config
-OPTUNA_DB_PATH = OPT_CONFIG.db_path
-OPTUNA_STUDY_NAME = OPT_CONFIG.study_name
+OPTUNA_DB_PATH = "sqlite:///regime_adaptive_v2_clean.db"
 
 _DATA_CACHE: Dict[str, List[Dict]] = {}
 OPTUNA_STUDY_NAME = "regime_adaptive_v2_clean"
+PROGRESS_LOG_FILE = "ftmo_optimization_progress.txt"
 
 # FIXED PERIODS FOR CONSISTENT BACKTESTING
 # These dates are locked to ensure reproducible results and proper train/validation splits
@@ -145,140 +131,6 @@ TRAINING_QUARTERS = {
 }
 
 ACCOUNT_SIZE = 200000.0
-
-
-@dataclass
-class FTMOComplianceTracker:
-    """Track FTMO compliance during backtest simulation."""
-
-    account_size: float = 200000.0
-    current_balance: float = 200000.0
-    highest_balance: float = 200000.0
-    day_start_balance: float = 200000.0
-    current_day: Optional[date] = None
-
-    # Tracking stats
-    trades_skipped_daily: int = 0
-    trades_skipped_dd: int = 0
-    trades_skipped_streak: int = 0
-    consecutive_losses: int = 0
-    halted_reason: Optional[str] = None
-
-    # FTMO Limits (configurable) - Relaxed for backtesting
-    daily_loss_halt_pct: float = 4.5  # Was 4.2, closer to 5% hard limit
-    total_dd_halt_pct: float = 9.0    # Was 8.0, closer to 10% hard limit
-    consecutive_loss_halt: int = 999  # DISABLED for backtesting - was 7, filtered too many trades
-
-    @property
-    def daily_loss_pct(self) -> float:
-        """Current daily loss as percentage."""
-        if self.current_balance >= self.day_start_balance:
-            return 0.0
-        return ((self.day_start_balance - self.current_balance) / self.day_start_balance) * 100
-
-    @property
-    def total_dd_pct(self) -> float:
-        """Current total drawdown as percentage from initial balance."""
-        if self.current_balance >= self.account_size:
-            return 0.0
-        return ((self.account_size - self.current_balance) / self.account_size) * 100
-
-    def check_new_day(self, trade_date: date) -> None:
-        """Check if it's a new trading day and reset daily tracking."""
-        if trade_date != self.current_day:
-            self.current_day = trade_date
-            self.day_start_balance = self.current_balance
-
-    def can_take_trade(self, potential_loss_usd: float) -> Tuple[bool, str]:
-        """
-        Check if a trade can be taken given current compliance state.
-
-        Args:
-            potential_loss_usd: Maximum potential loss in USD (if SL hit)
-
-        Returns:
-            (can_trade, reason)
-        """
-        # Check consecutive losses
-        if self.consecutive_losses >= self.consecutive_loss_halt:
-            self.trades_skipped_streak += 1
-            return False, f"Streak halt: {self.consecutive_losses} consecutive losses"
-
-        # Check daily loss before trade
-        if self.daily_loss_pct >= self.daily_loss_halt_pct:
-            self.trades_skipped_daily += 1
-            return False, f"Daily loss halt: {self.daily_loss_pct:.1f}%"
-
-        # Check total DD before trade
-        if self.total_dd_pct >= self.total_dd_halt_pct:
-            self.trades_skipped_dd += 1
-            return False, f"Total DD halt: {self.total_dd_pct:.1f}%"
-
-        # Simulate if trade loss would breach limits
-        simulated_balance = self.current_balance - abs(potential_loss_usd)
-
-        # Check simulated daily loss
-        if simulated_balance < self.day_start_balance:
-            simulated_daily_loss = ((self.day_start_balance - simulated_balance) / self.day_start_balance) * 100
-            if simulated_daily_loss >= 5.0:  # Hard FTMO limit
-                self.trades_skipped_daily += 1
-                return False, f"Would breach daily: {simulated_daily_loss:.1f}%"
-
-        # Check simulated total DD
-        if simulated_balance < self.account_size:
-            simulated_total_dd = ((self.account_size - simulated_balance) / self.account_size) * 100
-            if simulated_total_dd >= 10.0:  # Hard FTMO limit
-                self.trades_skipped_dd += 1
-                return False, f"Would breach total DD: {simulated_total_dd:.1f}%"
-
-        return True, "OK"
-
-    def update_after_trade(self, pnl: float) -> bool:
-        """
-        Update tracker after a trade completes.
-
-        Args:
-            pnl: Trade P&L in USD (positive = profit, negative = loss)
-
-        Returns:
-            True if challenge is still valid, False if failed
-        """
-        self.current_balance += pnl
-
-        # Update consecutive losses
-        if pnl < 0:
-            self.consecutive_losses += 1
-        else:
-            self.consecutive_losses = 0
-
-        # Update highest balance
-        if self.current_balance > self.highest_balance:
-            self.highest_balance = self.current_balance
-
-        # Check for hard limit breach
-        if self.daily_loss_pct >= 5.0:
-            self.halted_reason = f"FAILED: Daily loss {self.daily_loss_pct:.1f}% >= 5%"
-            return False
-
-        if self.total_dd_pct >= 10.0:
-            self.halted_reason = f"FAILED: Total DD {self.total_dd_pct:.1f}% >= 10%"
-            return False
-
-        return True
-
-    def get_report(self) -> Dict:
-        """Get compliance tracking report."""
-        return {
-            'final_balance': self.current_balance,
-            'total_return_pct': ((self.current_balance - self.account_size) / self.account_size) * 100,
-            'max_dd_pct': self.total_dd_pct,
-            'trades_skipped_daily': self.trades_skipped_daily,
-            'trades_skipped_dd': self.trades_skipped_dd,
-            'trades_skipped_streak': self.trades_skipped_streak,
-            'total_skipped': self.trades_skipped_daily + self.trades_skipped_dd + self.trades_skipped_streak,
-            'halted_reason': self.halted_reason,
-            'challenge_passed': self.halted_reason is None,
-        }
 
 
 def calculate_adx(candles: List[Dict], period: int = 14) -> float:
@@ -380,6 +232,187 @@ def check_adx_filter(candles: List[Dict], min_adx: float = 25.0) -> Tuple[bool, 
     return adx > min_adx, adx
 
 
+@dataclass
+class FTMOComplianceTracker:
+    """Track FTMO compliance during backtest simulation."""
+
+    account_size: float = 200000.0
+    starting_balance: float = 200000.0
+    current_balance: float = 200000.0
+    highest_balance: float = 200000.0
+    lowest_balance: float = 200000.0
+    day_start_balance: float = 200000.0
+    current_day: Optional[date] = None
+
+    trades_skipped_daily: int = 0
+    trades_skipped_dd: int = 0
+    trades_skipped_streak: int = 0
+    consecutive_losses: int = 0
+    halted_reason: Optional[str] = None
+
+    # FTMO Limits
+    daily_loss_halt_pct: float = 4.5
+    total_dd_halt_pct: float = 9.0
+    consecutive_loss_halt: int = 999
+    enable_streak_halt: bool = False
+
+    @property
+    def daily_loss_pct(self) -> float:
+        """Current daily loss as percentage of day start balance."""
+        if self.current_balance >= self.day_start_balance:
+            return 0.0
+        return ((self.day_start_balance - self.current_balance) / self.day_start_balance) * 100
+
+    @property
+    def total_dd_pct(self) -> float:
+        """
+        FTMO Total Drawdown: How far below STARTING balance are we?
+
+        FTMO Rule: Account cannot drop more than 10% below STARTING balance.
+        If you start at €200k, you cannot go below €180k - EVER.
+
+        This is NOT peak-to-trough! If you grow to €250k then drop to €210k,
+        your FTMO drawdown is 0% (still above €200k start).
+        """
+        if self.current_balance >= self.starting_balance:
+            return 0.0
+        return ((self.starting_balance - self.current_balance) / self.starting_balance) * 100
+
+    @property
+    def peak_to_trough_dd_pct(self) -> float:
+        """
+        Traditional peak-to-trough drawdown (for informational purposes).
+        NOT used for FTMO compliance, but useful for risk analysis.
+        """
+        if self.current_balance >= self.highest_balance:
+            return 0.0
+        return ((self.highest_balance - self.current_balance) / self.highest_balance) * 100
+
+    @property
+    def max_ftmo_dd_pct(self) -> float:
+        """Maximum FTMO drawdown experienced (lowest point below start)."""
+        if self.lowest_balance >= self.starting_balance:
+            return 0.0
+        return ((self.starting_balance - self.lowest_balance) / self.starting_balance) * 100
+
+    def _reset_day_if_needed(self, trade_date: Optional[date]) -> None:
+        """Reset daily start balance when the trading day changes."""
+        if trade_date is None:
+            return
+        if self.current_day is None or trade_date != self.current_day:
+            self.current_day = trade_date
+            self.day_start_balance = self.current_balance
+
+    def update_after_trade(self, pnl: float, trade_date: Optional[Union[datetime, date]] = None) -> bool:
+        """Update tracker after a trade completes."""
+
+        trade_day = None
+        if isinstance(trade_date, datetime):
+            trade_day = trade_date.date()
+        elif isinstance(trade_date, date):
+            trade_day = trade_date
+
+        self._reset_day_if_needed(trade_day)
+
+        self.current_balance += pnl
+
+        # Track highest and lowest balance
+        if self.current_balance > self.highest_balance:
+            self.highest_balance = self.current_balance
+        if self.current_balance < self.lowest_balance:
+            self.lowest_balance = self.current_balance
+
+        # Update consecutive losses
+        if pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
+
+        # Check for FTMO hard limit breach (10% below START)
+        if self.total_dd_pct >= 10.0:
+            self.halted_reason = f"FAILED: Total DD {self.total_dd_pct:.1f}% >= 10% (below starting balance)"
+            return False
+
+        # Check for daily loss breach (5% of day start)
+        if self.daily_loss_pct >= 5.0:
+            self.halted_reason = f"FAILED: Daily loss {self.daily_loss_pct:.1f}% >= 5%"
+            return False
+
+        if self.enable_streak_halt and self.consecutive_losses >= self.consecutive_loss_halt:
+            self.halted_reason = (
+                f"FAILED: Consecutive losses {self.consecutive_losses} >= {self.consecutive_loss_halt}"
+            )
+            return False
+
+        return True
+
+    def get_report(self) -> Dict:
+        """Get compliance tracking report."""
+        return {
+            'starting_balance': self.starting_balance,
+            'final_balance': self.current_balance,
+            'highest_balance': self.highest_balance,
+            'lowest_balance': self.lowest_balance,
+            'total_return_pct': ((self.current_balance - self.starting_balance) / self.starting_balance) * 100,
+            'max_ftmo_dd_pct': self.max_ftmo_dd_pct,
+            'max_peak_trough_dd_pct': ((self.highest_balance - self.lowest_balance) / self.highest_balance) * 100 if self.highest_balance > 0 else 0,
+            'trades_skipped_daily': self.trades_skipped_daily,
+            'trades_skipped_dd': self.trades_skipped_dd,
+            'trades_skipped_streak': self.trades_skipped_streak,
+            'total_skipped': self.trades_skipped_daily + self.trades_skipped_dd + self.trades_skipped_streak,
+            'halted_reason': self.halted_reason,
+            'challenge_passed': self.halted_reason is None and self.max_ftmo_dd_pct < 10.0,
+        }
+
+def compute_ftmo_compliance(trades: List[Any], risk_per_trade_usd: float) -> Dict:
+    """Compute FTMO compliance metrics for a list of trades."""
+
+    tracker = FTMOComplianceTracker(
+        account_size=ACCOUNT_SIZE,
+        starting_balance=ACCOUNT_SIZE,
+        current_balance=ACCOUNT_SIZE,
+        highest_balance=ACCOUNT_SIZE,
+        lowest_balance=ACCOUNT_SIZE,
+        day_start_balance=ACCOUNT_SIZE,
+    )
+
+    trades_sorted = sorted(trades, key=lambda t: str(getattr(t, 'entry_date', '')))
+
+    for trade in trades_sorted:
+        entry = getattr(trade, 'entry_date', None)
+        trade_date: Optional[date] = None
+
+        if isinstance(entry, str):
+            try:
+                parsed = datetime.fromisoformat(entry.replace("Z", "+00:00"))
+                trade_date = parsed.date()
+            except Exception:
+                trade_date = None
+        elif isinstance(entry, datetime):
+            trade_date = entry.date()
+        elif isinstance(entry, date):
+            trade_date = entry
+
+        rr_value = getattr(trade, 'rr', getattr(trade, 'r_multiple', 0))
+        pnl = rr_value * risk_per_trade_usd
+        tracker.update_after_trade(pnl=pnl, trade_date=trade_date)
+
+    return tracker.get_report()
+
+
+def log_optimization_progress(trial_num: int, value: float, best_value: float, best_params: Dict):
+    """Append optimization progress to log file."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    key_params = {k: round(v, 3) if isinstance(v, float) else v 
+                  for k, v in list(best_params.items())[:5]}
+    log_entry = (
+        f"[{timestamp}] Trial #{trial_num}: value={value:.0f}, "
+        f"best_value={best_value:.0f}, params={json.dumps(key_params)}\n"
+    )
+    with open(PROGRESS_LOG_FILE, 'a') as f:
+        f.write(log_entry)
+
+
 def show_optimization_status():
     """Display current optimization status without running new trials."""
     import optuna
@@ -421,6 +454,17 @@ def show_optimization_status():
     except Exception as e:
         print(f"\nError loading study: {e}")
         return
+    
+    if os.path.exists(PROGRESS_LOG_FILE):
+        print(f"\n{'='*60}")
+        print("RECENT PROGRESS (last 10 entries):")
+        print("=" * 60)
+        with open(PROGRESS_LOG_FILE, 'r') as f:
+            lines = f.readlines()
+            for line in lines[-10:]:
+                print(line.rstrip())
+    else:
+        print("\nNo progress log found yet.")
     
     print(f"\n{'='*60}")
     print("To resume optimization: python ftmo_challenge_analyzer.py")
@@ -646,6 +690,74 @@ def run_monte_carlo_analysis(trades: List[Any], num_simulations: int = 1000) -> 
     return results
 
 
+def simulate_ftmo_challenge(trades: List[Any], start_month: str = "2024-01", risk_pct: float = 0.5) -> Dict:
+    """Simulate an FTMO challenge starting from a specific month."""
+
+    account_size = 200000.0
+    balance = account_size
+    lowest_balance = account_size
+    highest_balance = account_size
+
+    filtered_trades: List[Any] = []
+    for trade in trades:
+        entry = getattr(trade, 'entry_date', None)
+        trade_month = None
+
+        if entry:
+            if isinstance(entry, str):
+                trade_month = entry[:7]
+            elif isinstance(entry, datetime):
+                trade_month = entry.strftime('%Y-%m')
+            elif isinstance(entry, date):
+                trade_month = entry.strftime('%Y-%m')
+
+        if trade_month and trade_month >= start_month:
+            filtered_trades.append(trade)
+
+    filtered_trades.sort(key=lambda t: str(getattr(t, 'entry_date', '')))
+
+    daily_pnl: Dict[str, float] = {}
+    risk_per_trade = account_size * (risk_pct / 100)
+
+    for idx, trade in enumerate(filtered_trades, 1):
+        pnl = getattr(trade, 'rr', 0) * risk_per_trade
+        balance += pnl
+
+        entry = getattr(trade, 'entry_date', '')
+        entry_str = str(entry)
+        entry_day = entry_str[:10]
+        daily_pnl[entry_day] = daily_pnl.get(entry_day, 0.0) + pnl
+
+        if balance < lowest_balance:
+            lowest_balance = balance
+        if balance > highest_balance:
+            highest_balance = balance
+
+        if balance < account_size * 0.90:
+            return {
+                'start_month': start_month,
+                'challenge_passed': False,
+                'failure_reason': f'Total DD exceeded 10% (balance: ${balance:,.0f})',
+                'final_balance': balance,
+                'max_ftmo_dd_pct': ((account_size - lowest_balance) / account_size) * 100,
+                'trades_executed': idx,
+            }
+
+    max_ftmo_dd = ((account_size - lowest_balance) / account_size) * 100 if lowest_balance < account_size else 0
+
+    return {
+        'start_month': start_month,
+        'challenge_passed': max_ftmo_dd < 10.0,
+        'final_balance': balance,
+        'profit': balance - account_size,
+        'profit_pct': ((balance - account_size) / account_size) * 100,
+        'max_ftmo_dd_pct': max_ftmo_dd,
+        'lowest_balance': lowest_balance,
+        'highest_balance': highest_balance,
+        'trades_executed': len(filtered_trades),
+    }
+
+
 def load_ohlcv_data(symbol: str, timeframe: str, start_date: datetime, end_date: datetime) -> List[Dict]:
     """Load OHLCV data from local CSV files only (no API calls). Uses cache for performance."""
     global _DATA_CACHE
@@ -719,12 +831,19 @@ def load_ohlcv_data(symbol: str, timeframe: str, start_date: datetime, end_date:
 
 
 def get_all_trading_assets() -> List[str]:
-    """Get list of all 34 tradeable assets (28 forex + 2 metals + 2 indices + 2 crypto).
+    """Get list of all tradeable assets."""
+    assets = []
+    assets.extend(FOREX_PAIRS if FOREX_PAIRS else [
+        "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "AUD_USD", "NZD_USD", "USD_CAD",
+        "EUR_GBP", "EUR_JPY", "GBP_JPY", "EUR_CHF", "EUR_AUD", "EUR_CAD", "EUR_NZD",
+        "GBP_CHF", "GBP_AUD", "GBP_CAD", "GBP_NZD", "AUD_JPY", "AUD_NZD", "AUD_CAD",
+        "AUD_CHF", "NZD_JPY", "NZD_CAD", "NZD_CHF", "CAD_JPY", "CAD_CHF", "CHF_JPY"
+    ])
+    assets.extend(METALS if METALS else ["XAU_USD", "XAG_USD"])
+    assets.extend(INDICES if INDICES else ["SPX500_USD", "NAS100_USD"])
+    assets.extend(CRYPTO_ASSETS if CRYPTO_ASSETS else ["BTC_USD", "ETH_USD"])
     
-    Uses symbol_mapping.ALL_TRADABLE_OANDA as the authoritative source.
-    """
-    from symbol_mapping import ALL_TRADABLE_OANDA
-    return list(ALL_TRADABLE_OANDA)
+    return list(set(assets))
 
 
 def run_full_period_backtest(
@@ -735,24 +854,12 @@ def run_full_period_backtest(
     risk_per_trade_pct: float = 0.5,
     atr_min_percentile: float = 60.0,
     trail_activation_r: float = 2.2,
+    december_atr_multiplier: float = 1.5,
     volatile_asset_boost: float = 1.5,
     ml_min_prob: Optional[float] = None,
     excluded_assets: Optional[List[str]] = None,
     require_adx_filter: bool = True,
     min_adx: float = 25.0,
-    enable_compliance_tracking: bool = True,
-    tp1_r_multiple: float = 1.2,
-    tp2_r_multiple: float = 2.0,
-    tp3_r_multiple: float = 3.5,
-    tp1_close_pct: float = 0.35,
-    tp2_close_pct: float = 0.35,
-    tp3_close_pct: float = 0.25,
-    use_htf_filter: bool = False,
-    use_structure_filter: bool = False,
-    use_fib_filter: bool = False,
-    use_confirmation_filter: bool = False,
-    use_displacement_filter: bool = False,
-    use_candle_rejection: bool = False,
     # ============================================================================
     # REGIME-ADAPTIVE V2 PARAMETERS
     # ============================================================================
@@ -769,7 +876,7 @@ def run_full_period_backtest(
     partial_exit_pct: float = 0.5,  # % to close at 1R
     use_adx_slope_rising: bool = False,  # Enable ADX slope rising early trend detection
     atr_vol_ratio_range: float = 0.8,  # ATR volatility ratio for range mode filter
-) -> Tuple[List[Trade], Dict]:
+) -> List[Trade]:
     """
     Run backtest for a given period with Regime-Adaptive V2 filtering.
     
@@ -843,22 +950,11 @@ def run_full_period_backtest(
                 risk_per_trade_pct=risk_per_trade_pct,
                 atr_min_percentile=atr_min_percentile,
                 trail_activation_r=trail_activation_r,
+                december_atr_multiplier=december_atr_multiplier,
                 volatile_asset_boost=volatile_asset_boost,
                 adx_trend_threshold=adx_trend_threshold,
                 adx_range_threshold=adx_range_threshold,
                 use_adx_regime_filter=use_adx_regime_filter,  # Pass ADX filter toggle to params
-                atr_tp1_multiplier=tp1_r_multiple,
-                atr_tp2_multiplier=tp2_r_multiple,
-                atr_tp3_multiplier=tp3_r_multiple,
-                tp1_close_pct=tp1_close_pct,
-                tp2_close_pct=tp2_close_pct,
-                tp3_close_pct=tp3_close_pct,
-                use_htf_filter=use_htf_filter,
-                use_structure_filter=use_structure_filter,
-                use_fib_filter=use_fib_filter,
-                use_confirmation_filter=use_confirmation_filter,
-                use_displacement_filter=use_displacement_filter,
-                use_candle_rejection=use_candle_rejection,
             )
             
             trades = simulate_trades(
@@ -926,40 +1022,7 @@ def run_full_period_backtest(
             if start_date <= entry <= end_date:
                 filtered_trades.append(trade)
     
-    if enable_compliance_tracking:
-        # Track compliance metrics WITHOUT filtering trades (for scoring)
-        # This lets us evaluate all trades but still compute DD/daily loss stats
-        tracker = FTMOComplianceTracker(account_size=ACCOUNT_SIZE, current_balance=ACCOUNT_SIZE)
-
-        for trade in filtered_trades:
-            entry_dt = getattr(trade, 'entry_date', None)
-            if isinstance(entry_dt, str):
-                try:
-                    entry_dt = datetime.fromisoformat(entry_dt.replace("Z", "+00:00"))
-                except:
-                    entry_dt = None
-
-            trade_date = entry_dt.date() if isinstance(entry_dt, datetime) else None
-            if trade_date:
-                tracker.check_new_day(trade_date)
-
-            trade_risk_pct = getattr(trade, 'risk_pct', risk_per_trade_pct)
-            potential_loss_usd = ACCOUNT_SIZE * (trade_risk_pct / 100.0)
-            trade_pnl_usd = potential_loss_usd * getattr(trade, 'rr', 0.0)
-            tracker.update_after_trade(trade_pnl_usd)
-
-        compliance_report = tracker.get_report()
-        # Mark as failed if breached hard limits (for penalty in scoring)
-        if tracker.total_dd_pct >= 10.0:
-            compliance_report['challenge_passed'] = False
-            compliance_report['halted_reason'] = f"FAILED: Total DD {tracker.total_dd_pct:.1f}% >= 10%"
-        elif tracker.daily_loss_pct >= 5.0:
-            compliance_report['challenge_passed'] = False
-            compliance_report['halted_reason'] = f"FAILED: Daily loss {tracker.daily_loss_pct:.1f}% >= 5%"
-
-        return filtered_trades, compliance_report
-
-    return filtered_trades, {'challenge_passed': True, 'halted_reason': None}
+    return filtered_trades
 
 
 def convert_to_backtest_trade(
@@ -1062,21 +1125,9 @@ def convert_to_backtest_trade(
     )
 
 
-def export_trades_to_csv(trades: List[Trade], filename: str, risk_per_trade_pct: float = 0.5, output_dir: Path = None):
-    """
-    Export trades to CSV with all required columns.
-    
-    Note: For new code, prefer using OutputManager.save_best_trial_trades() 
-    which automatically uses the correct mode-specific output directory.
-    
-    Args:
-        trades: List of Trade objects
-        filename: Output filename
-        risk_per_trade_pct: Risk percentage per trade
-        output_dir: Optional output directory (defaults to ftmo_analysis_output/)
-    """
-    target_dir = output_dir if output_dir else OUTPUT_DIR
-    filepath = target_dir / filename
+def export_trades_to_csv(trades: List[Trade], filename: str, risk_per_trade_pct: float = 0.5):
+    """Export trades to CSV with all required columns."""
+    filepath = OUTPUT_DIR / filename
     
     if not trades:
         print(f"No trades to export to {filename}")
@@ -1219,13 +1270,11 @@ class OptunaOptimizer:
     Optuna-based optimizer for FTMO strategy parameters.
     Runs optimization ONLY on training data (2023-01-01 to 2024-09-30).
     Uses persistent SQLite storage for resumability.
-    Uses OutputManager for structured CSV output.
     """
     
     def __init__(self):
         self.best_params: Dict = {}
         self.best_score: float = -float('inf')
-        self.output_manager = get_output_manager()
     
     def _objective(self, trial) -> float:
         """
@@ -1239,76 +1288,29 @@ class OptunaOptimizer:
         - Partial profit taking and trail management
         """
         # ============================================================================
-        # REGIME-ADAPTIVE V3 EXPANDED PARAMETER SEARCH SPACE (25+ Parameters)
+        # REGIME-ADAPTIVE V2 EXPANDED PARAMETER SEARCH SPACE (20+ Parameters)
         # ============================================================================
-        # EXPANDED RANGES FOR MAXIMUM EXPLORATION
-        # All step values are now divisible by range to avoid Optuna warnings
+        # AGGRESSIVELY LOOSENED PARAMETERS FOR MAXIMUM TRADE GENERATION
+        # Goal: Generate 200+ trades in training period + meaningful validation trades
         params = {
-            # Core Risk Management
-            'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.2, 1.0, step=0.1),  # Expanded: 0.2-1.0%
-            'max_concurrent_trades': trial.suggest_int('max_concurrent_trades', 3, 10),  # NEW: Position limit
-            
-            # Confluence Thresholds
-            'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 6),  # Full range
-            'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 3),
-            
-            # ADX Regime Detection
-            'adx_trend_threshold': trial.suggest_int('adx_trend_threshold', 18, 30),  # Int to avoid step issues
-            'adx_range_threshold': trial.suggest_int('adx_range_threshold', 12, 22),
-            'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),
-            'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),
-            
-            # ATR-based Parameters (fixed step divisibility)
-            'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.0, 3.0, step=0.25),  # Fixed: (3.0-1.0)/0.25=8
-            'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.1),   # Fixed: (1.0-0.5)/0.1=5
-            'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=10.0),  # Fixed: (70-30)/10=4
-            'atr_sl_multiplier': trial.suggest_float('atr_sl_multiplier', 1.0, 2.5, step=0.25),     # NEW: SL distance
-            
-            # Partial Exit Strategy
+            'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.3, 0.8, step=0.05),
+            'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 4),  # ULTRA-LOOSE: 2-4 (was 3-5)
+            'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 2),    # LOOSEN: 1-2 (was 1-3)
+            'adx_trend_threshold': trial.suggest_float('adx_trend_threshold', 15.0, 24.0, step=1.0),  # Allow much lower ADX
+            'adx_range_threshold': trial.suggest_float('adx_range_threshold', 10.0, 18.0, step=1.0),  # Allow lower range mode ADX
+            'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),   # Allow as low as 3
+            'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),   # Allow 2+
+            'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.2, 3.5, step=0.2),
+            'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
             'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', [True, False]),
-            'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.25, 0.75, step=0.1),     # Fixed: (0.75-0.25)/0.1=5
-            'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.5),   # Fixed: (3.0-1.0)/0.5=4
-
-            # TP & Scaling (NEW)
-            'tp1_r_multiple': trial.suggest_float('tp1_r_multiple', 1.0, 2.0, step=0.1),
-            'tp2_r_multiple': trial.suggest_float('tp2_r_multiple', 1.8, 3.0, step=0.1),
-            'tp3_r_multiple': trial.suggest_float('tp3_r_multiple', 2.5, 5.0, step=0.25),
-            'tp1_close_pct': trial.suggest_float('tp1_close_pct', 0.2, 0.5, step=0.05),
-            'tp2_close_pct': trial.suggest_float('tp2_close_pct', 0.2, 0.5, step=0.05),
-            'tp3_close_pct': trial.suggest_float('tp3_close_pct', 0.1, 0.4, step=0.05),
-
-            # Filter Toggles - TEMPORARILY DISABLED (all False) to prevent 0 trades
-            # These filters are too aggressive and filter out all trades
-            # Enable one-by-one after baseline is established
-            'use_htf_filter': False,  # trial.suggest_categorical('use_htf_filter', [True, False]),
-            'use_structure_filter': False,  # trial.suggest_categorical('use_structure_filter', [True, False]),
-            'use_fib_filter': False,  # trial.suggest_categorical('use_fib_filter', [True, False]),
-            'use_confirmation_filter': False,  # trial.suggest_categorical('use_confirmation_filter', [True, False]),
-            'use_displacement_filter': False,  # trial.suggest_categorical('use_displacement_filter', [True, False]),
-            'use_candle_rejection': False,  # trial.suggest_categorical('use_candle_rejection', [True, False]),
-            
-            # Seasonality Adjustments
-            'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.2),       # Fixed: (2.0-1.0)/0.2=5
-            'summer_risk_multiplier': trial.suggest_float('summer_risk_multiplier', 0.4, 1.0, step=0.2),   # NEW: Q3 seasonality
-            
-            # Fibonacci Zone (NEW)
-            'fib_zone_low': trial.suggest_float('fib_zone_low', 0.5, 0.65, step=0.05),   # NEW: Golden pocket low
-            'fib_zone_high': trial.suggest_float('fib_zone_high', 0.75, 0.9, step=0.05), # NEW: Golden pocket high
+            'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.8, step=0.05),
+            'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=5.0),  # AGGRESSIVELY LOOSEN!
+            'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.2),
+            'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.1),
+            'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.1),
         }
-
-        # =========================================================================
-        # Hard Constraints (prune early for invalid parameter combos)
-        # =========================================================================
-        if params['tp1_r_multiple'] >= params['tp2_r_multiple']:
-            return -100000.0
-        if params['tp2_r_multiple'] >= params['tp3_r_multiple']:
-            return -100000.0
-        if (params['tp1_close_pct'] + params['tp2_close_pct'] + params['tp3_close_pct']) > 0.85:
-            return -100000.0
-        if params['adx_trend_threshold'] <= params['adx_range_threshold']:
-            return -100000.0
         
-        training_trades, compliance_report = run_full_period_backtest(
+        training_trades = run_full_period_backtest(
             start_date=TRAINING_START,
             end_date=TRAINING_END,
             min_confluence=params['min_confluence_score'],
@@ -1316,11 +1318,12 @@ class OptunaOptimizer:
             risk_per_trade_pct=params['risk_per_trade_pct'],
             atr_min_percentile=params['atr_min_percentile'],
             trail_activation_r=params['trail_activation_r'],
+            december_atr_multiplier=params['december_atr_multiplier'],
             volatile_asset_boost=params['volatile_asset_boost'],
             ml_min_prob=None,
-            require_adx_filter=False,  # DISABLED: ADX filter completely disabled
+            require_adx_filter=True,
             min_adx=25.0,
-            use_adx_regime_filter=False,  # DISABLED: ADX regime filtering disabled
+            use_adx_regime_filter=False,  # DISABLED: ADX regime filtering disabled for now
             adx_trend_threshold=params['adx_trend_threshold'],
             adx_range_threshold=params['adx_range_threshold'],
             trend_min_confluence=params['trend_min_confluence'],
@@ -1330,25 +1333,7 @@ class OptunaOptimizer:
             atr_trail_multiplier=params['atr_trail_multiplier'],
             partial_exit_at_1r=params['partial_exit_at_1r'],
             partial_exit_pct=params['partial_exit_pct'],
-            enable_compliance_tracking=True,
-            tp1_r_multiple=params['tp1_r_multiple'],
-            tp2_r_multiple=params['tp2_r_multiple'],
-            tp3_r_multiple=params['tp3_r_multiple'],
-            tp1_close_pct=params['tp1_close_pct'],
-            tp2_close_pct=params['tp2_close_pct'],
-            tp3_close_pct=params['tp3_close_pct'],
-            use_htf_filter=params['use_htf_filter'],
-            use_structure_filter=params['use_structure_filter'],
-            use_fib_filter=params['use_fib_filter'],
-            use_confirmation_filter=params['use_confirmation_filter'],
-            use_displacement_filter=params['use_displacement_filter'],
-            use_candle_rejection=params['use_candle_rejection'],
         )
-
-        trial.set_user_attr('compliance_report', compliance_report)
-        # TEMPORARILY DISABLED: compliance check was filtering all trades
-        # if not compliance_report.get('challenge_passed', True):
-        #     return -100000.0
         
         if not training_trades or len(training_trades) == 0:
             trial.set_user_attr('quarterly_stats', {})
@@ -1360,7 +1345,11 @@ class OptunaOptimizer:
         wins = sum(1 for t in training_trades if getattr(t, 'rr', 0) > 0)
         overall_win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
         
-        # Always calculate quarterly stats (even for losing trials)
+        if total_r <= 0:
+            trial.set_user_attr('quarterly_stats', {})
+            trial.set_user_attr('overall_stats', {'trades': total_trades, 'profit': total_r, 'win_rate': overall_win_rate})
+            return -50000.0
+        
         quarterly_r = {q: 0.0 for q in TRAINING_QUARTERS.keys()}
         quarterly_trades = {q: [] for q in TRAINING_QUARTERS.keys()}
         
@@ -1382,6 +1371,7 @@ class OptunaOptimizer:
                         break
         
         risk_usd = ACCOUNT_SIZE * (params['risk_per_trade_pct'] / 100)
+        compliance_report = compute_ftmo_compliance(training_trades, risk_usd)
         
         quarterly_stats = {}
         for q in TRAINING_QUARTERS.keys():
@@ -1407,10 +1397,6 @@ class OptunaOptimizer:
             'profit': round(total_r * risk_usd, 2),
             'win_rate': round(overall_win_rate, 1)
         })
-        
-        # Early return for losing strategies (after logging stats)
-        if total_r <= 0:
-            return -50000.0
         
         # ============================================================================
         # PROFESSIONAL SCORING FORMULA V3
@@ -1548,6 +1534,35 @@ class OptunaOptimizer:
             dd_penalty = (max_drawdown_pct - 0.10) * 150  # 1.5 points per 1% over threshold
         elif max_drawdown_pct > 0.08:  # Warning zone
             dd_penalty = (max_drawdown_pct - 0.08) * 50
+
+        # ============================================================================
+        # COMPONENT: FTMO DRAWDOWN PENALTY (CRITICAL!)
+        # ============================================================================
+        max_ftmo_dd = compliance_report.get('max_ftmo_dd_pct', 0)
+
+        ftmo_dd_penalty = 0.0
+        if max_ftmo_dd >= 10.0:
+            ftmo_dd_penalty = 500.0
+        elif max_ftmo_dd >= 8.0:
+            ftmo_dd_penalty = 100.0 + (max_ftmo_dd - 8.0) * 50
+        elif max_ftmo_dd >= 5.0:
+            ftmo_dd_penalty = 20.0 + (max_ftmo_dd - 5.0) * 20
+        elif max_ftmo_dd >= 3.0:
+            ftmo_dd_penalty = (max_ftmo_dd - 3.0) * 5
+        else:
+            ftmo_dd_penalty = -10.0
+
+        # ============================================================================
+        # COMPONENT: FTMO CHALLENGE PASS BONUS
+        # ============================================================================
+        ftmo_pass_bonus = 0.0
+        if max_ftmo_dd < 10.0 and compliance_report.get('challenge_passed', False):
+            ftmo_pass_bonus = 50.0
+
+            if max_ftmo_dd < 5.0:
+                ftmo_pass_bonus += 30.0
+            elif max_ftmo_dd < 7.0:
+                ftmo_pass_bonus += 15.0
         
         # Consistency Penalty: Penalize bad quarters (but don't kill the score)
         consistency_penalty = 0.0
@@ -1572,8 +1587,10 @@ class OptunaOptimizer:
             sharpe_bonus +        # Risk-adjusted return quality (NEW!)
             pf_bonus +            # Profit factor quality
             wr_bonus +            # Win rate quality
-            trade_bonus -         # Trade frequency balance
+            trade_bonus +         # Trade frequency balance
+            ftmo_pass_bonus -     # Bonus for passing FTMO (NEW!)
             dd_penalty -          # Drawdown risk
+            ftmo_dd_penalty -     # FTMO-specific DD penalty (NEW! CRITICAL!)
             consistency_penalty   # Quarter consistency
         )
         
@@ -1586,25 +1603,25 @@ class OptunaOptimizer:
         trial.set_user_attr('negative_quarters', negative_quarter_count)
         trial.set_user_attr('total_r', round(total_r, 2))
         trial.set_user_attr('win_rate', round(overall_win_rate, 2))
+        trial.set_user_attr('max_ftmo_dd_pct', round(max_ftmo_dd, 2))
+        trial.set_user_attr('ftmo_challenge_passed', compliance_report.get('challenge_passed', False))
+        trial.set_user_attr('compliance_report', compliance_report)
         trial.set_user_attr('score_breakdown', {
             'base_r': round(base_score, 2),
             'sharpe_bonus': round(sharpe_bonus, 2),
             'pf_bonus': round(pf_bonus, 2),
             'wr_bonus': round(wr_bonus, 2),
             'trade_bonus': round(trade_bonus, 2),
+            'ftmo_pass_bonus': round(ftmo_pass_bonus, 2),
             'dd_penalty': round(dd_penalty, 2),
+            'ftmo_dd_penalty': round(ftmo_dd_penalty, 2),
             'consistency_penalty': round(consistency_penalty, 2),
         })
         
         return final_score
     
-    def run_optimization(self, n_trials: int = 5, early_stopping_patience: int = 20) -> Dict:
-        """Run Optuna optimization on TRAINING data only.
-        
-        Args:
-            n_trials: Number of trials to run
-            early_stopping_patience: Stop if no improvement after this many trials (default: 20)
-        """
+    def run_optimization(self, n_trials: int = 5) -> Dict:
+        """Run Optuna optimization on TRAINING data only."""
         import optuna
         from optuna.pruners import MedianPruner
         
@@ -1615,7 +1632,6 @@ class OptunaOptimizer:
         print(f"TRAINING PERIOD: 2023-01-01 to 2024-09-30")
         print(f"Regime-Adaptive V2: Trend (ADX >= threshold) + Conservative Range (ADX < threshold)")
         print(f"Storage: {OPTUNA_DB_PATH} (resumable)")
-        print(f"Early Stopping: After {early_stopping_patience} trials without improvement")
         print(f"{'='*60}")
         
         study = optuna.create_study(
@@ -1629,18 +1645,12 @@ class OptunaOptimizer:
         
         existing_trials = len(study.trials)
         previous_best_value = None  # Track previous best to detect real improvements
-        previous_best_trial_number = None
         if existing_trials > 0:
             print(f"Resuming from existing study with {existing_trials} completed trials")
             try:
                 if study.best_trial and study.best_value is not None:
                     previous_best_value = study.best_value
-                    previous_best_trial_number = study.best_trial.number
                     print(f"Current best value: {study.best_value:.0f}")
-                    
-                    # Sync OutputManager's best_score with database to prevent false "NEW BEST" messages
-                    om = get_output_manager()
-                    om.sync_best_from_study(previous_best_value, previous_best_trial_number)
                 else:
                     print("No best trial found yet (all trials may have failed)")
             except (ValueError, AttributeError) as e:
@@ -1649,13 +1659,26 @@ class OptunaOptimizer:
         # Store best value before optimization starts for comparison
         best_value_before_run = previous_best_value
         
-        # Early stopping tracking
-        trials_without_improvement = 0
-        last_best_value = previous_best_value
-        early_stopped = False
-        
         def progress_callback(study, trial):
+            """
+            Callback executed after each trial completes.
+            
+            IMPORTANT: This function runs DURING optimization.
+            - Only log trial results and statistics
+            - DO NOT run validation or final backtests here
+            - DO NOT export CSV files here
+            
+            All CSV exports and validation runs happen AFTER optimization
+            completes in the main() function via validate_top_trials().
+            """
             nonlocal best_value_before_run
+            
+            log_optimization_progress(
+                trial_num=trial.number,
+                value=trial.value if trial.value is not None else 0,
+                best_value=study.best_value if study.best_trial else 0,
+                best_params=study.best_params if study.best_trial else {}
+            )
             
             # Check if this trial is STRICTLY better than the previous best
             is_new_best = False
@@ -1674,24 +1697,6 @@ class OptunaOptimizer:
                         best_value_before_run = current_best
             except (ValueError, AttributeError):
                 pass
-            
-            # Early stopping check
-            nonlocal trials_without_improvement, last_best_value, early_stopped
-            current_best_for_stopping = study.best_value if study.best_trial else None
-            if current_best_for_stopping is not None:
-                if last_best_value is None or current_best_for_stopping > last_best_value:
-                    # Improvement found
-                    trials_without_improvement = 0
-                    last_best_value = current_best_for_stopping
-                else:
-                    # No improvement
-                    trials_without_improvement += 1
-                    
-                    if trials_without_improvement >= early_stopping_patience:
-                        print(f"\n🛑 EARLY STOPPING: No improvement for {early_stopping_patience} consecutive trials")
-                        print(f"   Best score remains: {last_best_value:.2f}")
-                        early_stopped = True
-                        study.stop()
             
             quarterly_stats = trial.user_attrs.get('quarterly_stats', {})
             overall_stats = trial.user_attrs.get('overall_stats', {})
@@ -1724,51 +1729,51 @@ class OptunaOptimizer:
                     print(f"{'OVERALL':<10} {overall_stats.get('trades', 0):>8} {overall_stats.get('wins', 0):>6} {overall_stats.get('win_rate', 0):>7.1f}% {overall_stats.get('r_total', 0):>10.2f} {profit_str:>12}")
             else:
                 print("  No trades generated for this trial")
+
+            max_ftmo_dd = trial.user_attrs.get('max_ftmo_dd_pct', 0)
+            challenge_passed = trial.user_attrs.get('ftmo_challenge_passed', False)
+            print(f"  FTMO DD: {max_ftmo_dd:.1f}% | Challenge: {'✅ PASS' if challenge_passed else '❌ FAIL'}")
+            
+            # Log to OutputManager for persistent optimization.log
+            output_mgr = get_output_manager()
+            if overall_stats:
+                output_mgr.log_trial(
+                    trial_number=trial.number,
+                    score=trial.value if trial.value else 0,
+                    total_r=overall_stats.get('r_total', 0),
+                    sharpe_ratio=trial.user_attrs.get('sharpe_ratio', 0),
+                    win_rate=overall_stats.get('win_rate', 0),
+                    profit_factor=trial.user_attrs.get('profit_factor', 0),
+                    total_trades=overall_stats.get('trades', 0),
+                    profit_usd=overall_stats.get('profit', 0),
+                    max_drawdown_pct=trial.user_attrs.get('max_drawdown_pct', 0),
+                    ftmo_dd_pct=max_ftmo_dd,
+                    ftmo_challenge_passed=challenge_passed,
+                )
             
             print(f"{'─'*70}\n")
-            
-            # Log trial to CSV for nohup tracking
-            om = get_output_manager()
-            om.log_trial(
-                trial_number=trial.number,
-                score=trial.value if trial.value else 0,
-                total_r=overall_stats.get('r_total', 0) if overall_stats else 0,
-                sharpe_ratio=trial.user_attrs.get('sharpe_ratio', 0),
-                win_rate=overall_stats.get('win_rate', 0) if overall_stats else 0,
-                profit_factor=trial.user_attrs.get('profit_factor', 0),
-                total_trades=overall_stats.get('trades', 0) if overall_stats else 0,
-                profit_usd=overall_stats.get('profit', 0) if overall_stats else 0,
-                max_drawdown_pct=trial.user_attrs.get('max_drawdown_pct', 0),
-            )
-            
-            # REMOVED: No longer export CSVs for every new best trial
-            # Validation and final analysis only run at the end for top 5 trials
         
-        try:
-            study.optimize(
-                self._objective,
-                n_trials=n_trials,
-                show_progress_bar=False,
-                callbacks=[progress_callback]
-            )
-        except optuna.exceptions.OptunaError as e:
-            # study.stop() raises this when early stopping
-            if "stopped" not in str(e).lower():
-                raise
+        # ============================================================================
+        # CRITICAL: DO NOT ADD CSV EXPORTS OR VALIDATION RUNS HERE!
+        # ============================================================================
+        # This progress_callback runs DURING optimization (after each trial).
+        # CSV exports and validation runs should ONLY happen at the END in main().
+        # See validate_top_trials() function which runs validation on top 5 trials.
+        # ============================================================================
+        
+        study.optimize(
+            self._objective,
+            n_trials=n_trials,
+            show_progress_bar=False,
+            callbacks=[progress_callback]
+        )
         
         self.best_params = study.best_params
         self.best_score = study.best_value
         
-        # Log early stopping status
-        if early_stopped:
-            print(f"\n{'='*60}")
-            print(f"OPTIMIZATION EARLY STOPPED (No improvement for {early_stopping_patience} trials)")
-            print(f"{'='*60}")
-        else:
-            print(f"\n{'='*60}")
-            print(f"OPTIMIZATION COMPLETE")
-            print(f"{'='*60}")
-        
+        print(f"\n{'='*60}")
+        print(f"OPTIMIZATION COMPLETE")
+        print(f"{'='*60}")
         print(f"Total Trials: {len(study.trials)}")
         print(f"Best Score: {self.best_score:.0f}")
         print(f"Best Parameters:")
@@ -1785,6 +1790,7 @@ class OptunaOptimizer:
             'risk_per_trade_pct': self.best_params.get('risk_per_trade_pct', 0.5),
             'atr_min_percentile': self.best_params.get('atr_min_percentile', 75.0),
             'trail_activation_r': self.best_params.get('trail_activation_r', 2.2),
+            'december_atr_multiplier': self.best_params.get('december_atr_multiplier', 1.5),
             'volatile_asset_boost': self.best_params.get('volatile_asset_boost', 1.5),
             # Regime-Adaptive V2 parameters
             'adx_trend_threshold': self.best_params.get('adx_trend_threshold', 25.0),
@@ -1804,7 +1810,6 @@ class OptunaOptimizer:
         
         try:
             save_optimized_params(params_to_save, backup=True)
-            self.output_manager.save_best_params(params_to_save)  # Also save for archiving
             print(f"\nOptimized parameters saved to params/current_params.json")
         except Exception as e:
             print(f"Failed to save params: {e}")
@@ -1815,8 +1820,6 @@ class OptunaOptimizer:
             'n_trials': n_trials,
             'total_trials': len(study.trials),
             'study': study,  # Return study for top 5 analysis
-            'early_stopped': early_stopped,
-            'trials_without_improvement': trials_without_improvement,
         }
 
 
@@ -1886,7 +1889,7 @@ def validate_top_trials(study, top_n: int = 5) -> List[Dict]:
         print(f"[{rank}/{len(sorted_trials)}] Trial #{trial.number} (Training Score: {score_display})")
         
         # Run validation backtest
-        validation_trades, validation_compliance = run_full_period_backtest(
+        validation_trades = run_full_period_backtest(
             start_date=VALIDATION_START,
             end_date=VALIDATION_END,
             min_confluence=params.get('min_confluence_score', 3),
@@ -1894,9 +1897,10 @@ def validate_top_trials(study, top_n: int = 5) -> List[Dict]:
             risk_per_trade_pct=params.get('risk_per_trade_pct', 0.5),
             atr_min_percentile=params.get('atr_min_percentile', 60.0),
             trail_activation_r=params.get('trail_activation_r', 2.2),
+            december_atr_multiplier=params.get('december_atr_multiplier', 1.5),
             volatile_asset_boost=params.get('volatile_asset_boost', 1.5),
             ml_min_prob=None,
-            require_adx_filter=False,  # DISABLED
+            require_adx_filter=True,
             use_adx_regime_filter=False,
             adx_trend_threshold=params.get('adx_trend_threshold', 25.0),
             adx_range_threshold=params.get('adx_range_threshold', 20.0),
@@ -1906,19 +1910,6 @@ def validate_top_trials(study, top_n: int = 5) -> List[Dict]:
             atr_trail_multiplier=params.get('atr_trail_multiplier', 1.5),
             partial_exit_at_1r=params.get('partial_exit_at_1r', True),
             partial_exit_pct=params.get('partial_exit_pct', 0.5),
-            enable_compliance_tracking=True,
-            tp1_r_multiple=params.get('tp1_r_multiple', 1.2),
-            tp2_r_multiple=params.get('tp2_r_multiple', 2.0),
-            tp3_r_multiple=params.get('tp3_r_multiple', 3.5),
-            tp1_close_pct=params.get('tp1_close_pct', 0.35),
-            tp2_close_pct=params.get('tp2_close_pct', 0.35),
-            tp3_close_pct=params.get('tp3_close_pct', 0.25),
-            use_htf_filter=params.get('use_htf_filter', False),
-            use_structure_filter=params.get('use_structure_filter', False),
-            use_fib_filter=params.get('use_fib_filter', False),
-            use_confirmation_filter=params.get('use_confirmation_filter', False),
-            use_displacement_filter=params.get('use_displacement_filter', False),
-            use_candle_rejection=params.get('use_candle_rejection', False),
         )
         
         # Calculate validation metrics
@@ -1936,7 +1927,6 @@ def validate_top_trials(study, top_n: int = 5) -> List[Dict]:
             'validation_wins': val_wins,
             'validation_wr': val_wr,
             'validation_trade_objects': validation_trades,
-            'validation_compliance': validation_compliance,
         }
         validation_results.append(result)
         
@@ -2100,10 +2090,8 @@ def generate_summary_txt(
 # Uses Pareto frontier to find non-dominated solutions
 # ============================================================================
 
-# Use unified config for multi-objective as well
-# When use_multi_objective=True, we use the same DB but different study name
-MULTI_OBJECTIVE_DB = OPT_CONFIG.db_path
-MULTI_OBJECTIVE_STUDY_NAME = f"{OPT_CONFIG.study_name}_multi"
+MULTI_OBJECTIVE_DB = "sqlite:///multi_objective_study.db"
+MULTI_OBJECTIVE_STUDY_NAME = "ftmo_multi_objective_v1"
 
 
 def multi_objective_function(trial) -> Tuple[float, float, float]:
@@ -2116,74 +2104,29 @@ def multi_objective_function(trial) -> Tuple[float, float, float]:
     
     All three should be MAXIMIZED (Optuna NSGA-II handles this).
     """
-    # ============================================================================
-    # NSGA-II EXPANDED PARAMETER SPACE (25+ Parameters)
-    # All step values verified for divisibility to avoid Optuna warnings
-    # ============================================================================
+    # Sample hyperparameters (same as single-objective)
     params = {
-        # Core Risk Management
-        'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.2, 1.0, step=0.1),
-        'max_concurrent_trades': trial.suggest_int('max_concurrent_trades', 3, 10),
-        
-        # Confluence Thresholds
         'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 6),
-        'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 3),
-        
-        # ADX Regime Detection
-        'adx_trend_threshold': trial.suggest_int('adx_trend_threshold', 18, 30),
-        'adx_range_threshold': trial.suggest_int('adx_range_threshold', 12, 22),
-        'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),
+        'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 4),
+        'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.3, 0.6, step=0.05),
+        'atr_min_percentile': trial.suggest_float('atr_min_percentile', 40.0, 80.0, step=5.0),
+        'trail_activation_r': trial.suggest_float('trail_activation_r', 0.8, 2.0, step=0.2),
+        'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.2),
+        'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 1.5, step=0.1),
+        'adx_trend_threshold': trial.suggest_int('adx_trend_threshold', 15, 30),
+        'adx_range_threshold': trial.suggest_int('adx_range_threshold', 10, 25),
+        'trend_min_confluence': trial.suggest_int('trend_min_confluence', 2, 5),
         'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),
-        
-        # ATR-based Parameters (fixed step divisibility)
-        'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.0, 3.0, step=0.25),
-        'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.1),
-        'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=10.0),
-        'atr_sl_multiplier': trial.suggest_float('atr_sl_multiplier', 1.0, 2.5, step=0.25),
-        
-        # Partial Exit Strategy
+        'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
+        'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.2, 3.5, step=0.2),
         'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', [True, False]),
-        'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.25, 0.75, step=0.1),
-        'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.5),
-
-        # TP & Scaling
-        'tp1_r_multiple': trial.suggest_float('tp1_r_multiple', 1.0, 2.0, step=0.1),
-        'tp2_r_multiple': trial.suggest_float('tp2_r_multiple', 1.8, 3.0, step=0.1),
-        'tp3_r_multiple': trial.suggest_float('tp3_r_multiple', 2.5, 5.0, step=0.25),
-        'tp1_close_pct': trial.suggest_float('tp1_close_pct', 0.2, 0.5, step=0.05),
-        'tp2_close_pct': trial.suggest_float('tp2_close_pct', 0.2, 0.5, step=0.05),
-        'tp3_close_pct': trial.suggest_float('tp3_close_pct', 0.1, 0.4, step=0.05),
-
-        # Filter Toggles - TEMPORARILY DISABLED (all False) to prevent 0 trades
-        'use_htf_filter': False,  # trial.suggest_categorical('use_htf_filter', [True, False]),
-        'use_structure_filter': False,  # trial.suggest_categorical('use_structure_filter', [True, False]),
-        'use_fib_filter': False,  # trial.suggest_categorical('use_fib_filter', [True, False]),
-        'use_confirmation_filter': False,  # trial.suggest_categorical('use_confirmation_filter', [True, False]),
-        'use_displacement_filter': False,  # trial.suggest_categorical('use_displacement_filter', [True, False]),
-        'use_candle_rejection': False,  # trial.suggest_categorical('use_candle_rejection', [True, False]),
-        
-        # Seasonality Adjustments
-        'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.2),
-        'summer_risk_multiplier': trial.suggest_float('summer_risk_multiplier', 0.4, 1.0, step=0.2),
-        
-        # Fibonacci Zone
-        'fib_zone_low': trial.suggest_float('fib_zone_low', 0.5, 0.65, step=0.05),
-        'fib_zone_high': trial.suggest_float('fib_zone_high', 0.75, 0.9, step=0.05),
+        'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.8, step=0.05),
     }
     
     risk_pct = params['risk_per_trade_pct']
-
-    if params['tp1_r_multiple'] >= params['tp2_r_multiple']:
-        return (-1000.0, -10.0, 0.0)
-    if params['tp2_r_multiple'] >= params['tp3_r_multiple']:
-        return (-1000.0, -10.0, 0.0)
-    if (params['tp1_close_pct'] + params['tp2_close_pct'] + params['tp3_close_pct']) > 0.85:
-        return (-1000.0, -10.0, 0.0)
-    if params['adx_trend_threshold'] <= params['adx_range_threshold']:
-        return (-1000.0, -10.0, 0.0)
     
     # Run training backtest
-    training_trades, compliance_report = run_full_period_backtest(
+    training_trades = run_full_period_backtest(
         start_date=TRAINING_START,
         end_date=TRAINING_END,
         min_confluence=params['min_confluence_score'],
@@ -2191,9 +2134,10 @@ def multi_objective_function(trial) -> Tuple[float, float, float]:
         risk_per_trade_pct=risk_pct,
         atr_min_percentile=params['atr_min_percentile'],
         trail_activation_r=params['trail_activation_r'],
+        december_atr_multiplier=params['december_atr_multiplier'],
         volatile_asset_boost=params['volatile_asset_boost'],
         ml_min_prob=None,
-        require_adx_filter=False,  # DISABLED
+        require_adx_filter=True,
         use_adx_regime_filter=False,
         adx_trend_threshold=params['adx_trend_threshold'],
         adx_range_threshold=params['adx_range_threshold'],
@@ -2203,24 +2147,7 @@ def multi_objective_function(trial) -> Tuple[float, float, float]:
         atr_trail_multiplier=params['atr_trail_multiplier'],
         partial_exit_at_1r=params['partial_exit_at_1r'],
         partial_exit_pct=params['partial_exit_pct'],
-        enable_compliance_tracking=True,
-        tp1_r_multiple=params['tp1_r_multiple'],
-        tp2_r_multiple=params['tp2_r_multiple'],
-        tp3_r_multiple=params['tp3_r_multiple'],
-        tp1_close_pct=params['tp1_close_pct'],
-        tp2_close_pct=params['tp2_close_pct'],
-        tp3_close_pct=params['tp3_close_pct'],
-        use_htf_filter=params['use_htf_filter'],
-        use_structure_filter=params['use_structure_filter'],
-        use_fib_filter=params['use_fib_filter'],
-        use_confirmation_filter=params['use_confirmation_filter'],
-        use_displacement_filter=params['use_displacement_filter'],
-        use_candle_rejection=params['use_candle_rejection'],
     )
-
-    # TEMPORARILY DISABLED: compliance check was filtering all trades
-    # if not compliance_report.get('challenge_passed', True):
-    #     return (-1000.0, -10.0, 0.0)
     
     # Calculate objectives
     if not training_trades or len(training_trades) < 10:
@@ -2335,121 +2262,18 @@ def run_multi_objective_optimization(n_trials: int = 50) -> Dict:
         print(f"   Win Rate: {wr:.1f}%")
         print(f"   Composite Score: {best_composite_score:.3f}")
         
-        # ============================================================================
-        # PHASE 2: TOP-5 PARETO VALIDATION (OOS Check)
-        # Same validation flow as TPE - prevents overfitting
-        # ============================================================================
-        print(f"\n{'='*70}")
-        print("PHASE 2: TOP-5 PARETO VALIDATION (Out-of-Sample)")
-        print(f"{'='*70}")
-        print("Running validation backtests on top 5 Pareto trials...")
-        
-        # Sort Pareto trials by composite score
-        pareto_scored = []
-        for trial in pareto_trials:
-            total_r, sharpe, wr = trial.values
-            r_score = total_r / 100
-            sharpe_score = sharpe
-            wr_score = (wr - 40) / 20
-            composite = 0.40 * r_score + 0.35 * sharpe_score + 0.25 * wr_score
-            pareto_scored.append((trial, composite, total_r, sharpe, wr))
-        
-        pareto_scored.sort(key=lambda x: x[1], reverse=True)
-        top_5_pareto = [t[0] for t in pareto_scored[:5]]
-        
-        # Run validation on top 5
-        validation_results = []
-        for rank, trial in enumerate(top_5_pareto, 1):
-            params = trial.params
-            training_r = trial.values[0]
-            
-            print(f"  [{rank}/5] Trial #{trial.number} (Training R: {training_r:+.1f})")
-            
-            val_trades, val_compliance = run_full_period_backtest(
-                start_date=VALIDATION_START,
-                end_date=VALIDATION_END,
-                min_confluence=params.get('min_confluence_score', 3),
-                min_quality_factors=params.get('min_quality_factors', 2),
-                risk_per_trade_pct=params.get('risk_per_trade_pct', 0.5),
-                atr_min_percentile=params.get('atr_min_percentile', 60.0),
-                trail_activation_r=params.get('trail_activation_r', 2.2),
-                volatile_asset_boost=params.get('volatile_asset_boost', 1.5),
-                ml_min_prob=None,
-                require_adx_filter=False,  # DISABLED
-                use_adx_regime_filter=False,
-                adx_trend_threshold=params.get('adx_trend_threshold', 25.0),
-                adx_range_threshold=params.get('adx_range_threshold', 20.0),
-                trend_min_confluence=params.get('trend_min_confluence', 6),
-                range_min_confluence=params.get('range_min_confluence', 5),
-                atr_volatility_ratio=params.get('atr_vol_ratio_range', 0.8),
-                atr_trail_multiplier=params.get('atr_trail_multiplier', 1.5),
-                partial_exit_at_1r=params.get('partial_exit_at_1r', True),
-                partial_exit_pct=params.get('partial_exit_pct', 0.5),
-                enable_compliance_tracking=True,
-                tp1_r_multiple=params.get('tp1_r_multiple', 1.2),
-                tp2_r_multiple=params.get('tp2_r_multiple', 2.0),
-                tp3_r_multiple=params.get('tp3_r_multiple', 3.5),
-                tp1_close_pct=params.get('tp1_close_pct', 0.35),
-                tp2_close_pct=params.get('tp2_close_pct', 0.35),
-                tp3_close_pct=params.get('tp3_close_pct', 0.25),
-                use_htf_filter=params.get('use_htf_filter', False),
-                use_structure_filter=params.get('use_structure_filter', False),
-                use_fib_filter=params.get('use_fib_filter', False),
-                use_confirmation_filter=params.get('use_confirmation_filter', False),
-                use_displacement_filter=params.get('use_displacement_filter', False),
-                use_candle_rejection=params.get('use_candle_rejection', False),
-            )
-            
-            val_r = sum(getattr(t, 'rr', 0) for t in val_trades) if val_trades else 0
-            val_n = len(val_trades) if val_trades else 0
-            val_wins = sum(1 for t in val_trades if getattr(t, 'rr', 0) > 0) if val_trades else 0
-            val_wr = (val_wins / val_n * 100) if val_n > 0 else 0
-            
-            validation_results.append({
-                'trial': trial,
-                'params': params,
-                'training_r': training_r,
-                'val_r': val_r,
-                'val_trades': val_n,
-                'val_wr': val_wr,
-                'val_trade_objects': val_trades,
-                'val_compliance': val_compliance,
-            })
-            print(f"      → Validation: {val_n} trades, R={val_r:+.1f}, WR={val_wr:.1f}%")
-        
-        # Sort by validation R (best OOS performance)
-        validation_results.sort(key=lambda x: x['val_r'], reverse=True)
-        
-        print(f"\n{'='*70}")
-        print("VALIDATION RANKING (Best OOS Performance)")
-        print(f"{'='*70}")
-        print(f"{'Rank':<6} {'Trial':<8} {'Train R':>10} {'Val R':>10} {'Val WR':>10}")
-        print(f"{'-'*50}")
-        for rank, res in enumerate(validation_results, 1):
-            print(f"{rank:<6} #{res['trial'].number:<6} {res['training_r']:>+10.1f} {res['val_r']:>+10.1f} {res['val_wr']:>9.1f}%")
-        
-        # Select best OOS performer
-        best_oos = validation_results[0]
-        best_trial = best_oos['trial']
-        best_params = best_oos['params']
-        total_r, sharpe, wr = best_trial.values
-        
-        print(f"\n🏆 SELECTED: Trial #{best_trial.number} (Best OOS Performance)")
-        print(f"   Training R: {total_r:+.1f}, Sharpe: {sharpe:.2f}, WR: {wr:.1f}%")
-        print(f"   Validation R: {best_oos['val_r']:+.1f}, WR: {best_oos['val_wr']:.1f}%")
+        best_params = best_trial.params
         
         # Save best params
         save_best_params_persistent(best_params)
         
         return {
             'best_params': best_params,
-            'best_score': best_oos['val_r'],  # Use OOS score for selection
+            'best_score': best_composite_score,
             'pareto_trials': len(pareto_trials),
             'total_r': total_r,
             'sharpe': sharpe,
             'win_rate': wr,
-            'validation_r': best_oos['val_r'],
-            'validation_wr': best_oos['val_wr'],
             'study': study,
             'n_trials': n_trials,
             'total_trials': len(study.trials),
@@ -2468,17 +2292,15 @@ def main():
     """
     Professional FTMO Optimization Workflow with CLI support.
     
-    Configuration is loaded from params/optimization_config.json
-    CLI arguments can override config file settings.
+    Uses ROLLING OPTIMIZATION window (last 18 months) for adaptive parameter fitting.
+    Training: 1 year of historical data ending 3 months ago
+    Validation: Most recent 3 months (out-of-sample)
     
     Usage:
-      python ftmo_challenge_analyzer.py              # Run/resume optimization (default 5 trials)
+      python ftmo_challenge_analyzer.py              # Run/resume optimization (5 trials)
       python ftmo_challenge_analyzer.py --status     # Check progress without running
-      python ftmo_challenge_analyzer.py --config     # Show current configuration
       python ftmo_challenge_analyzer.py --trials 100 # Run 100 trials
       python ftmo_challenge_analyzer.py --multi      # Use NSGA-II multi-objective optimization
-      python ftmo_challenge_analyzer.py --single     # Use TPE single-objective optimization
-      python ftmo_challenge_analyzer.py --adx        # Enable ADX regime filtering
     """
     parser = argparse.ArgumentParser(
         description="FTMO Professional Optimization System - Resumable with ADX Filter"
@@ -2502,96 +2324,43 @@ def main():
     parser.add_argument(
         "--single",
         action="store_true",
-        help="Use TPE single-objective optimization (composite score)"
-    )
-    parser.add_argument(
-        "--patience",
-        type=int,
-        default=20,
-        help="Early stopping patience - stop if no improvement after N trials (default: 20)"
-    )
-    parser.add_argument(
-        "--adx",
-        action="store_true", 
-        help="Enable ADX regime filtering (Trend/Range/Transition modes)"
-    )
-    parser.add_argument(
-        "--config",
-        action="store_true",
-        help="Show current optimization configuration and exit"
+        help="Use TPE single-objective optimization (default mode)"
     )
     args = parser.parse_args()
-    
-    # Load unified config and override with CLI args
-    config = get_optimization_config(reload=True)
-    
-    if args.config:
-        config.print_summary()
-        return
     
     if args.status:
         show_optimization_status()
         return
     
-    # CLI args override config file settings
     n_trials = args.trials
+    use_multi_objective = args.multi
     
-    # Handle --multi and --single flags (mutually exclusive override)
-    if args.multi and args.single:
-        print("❌ ERROR: Cannot use both --multi and --single flags simultaneously")
-        return
-    
-    if args.multi:
-        use_multi_objective = True  # Explicit NSGA-II
-    elif args.single:
-        use_multi_objective = False  # Explicit TPE
-    else:
-        use_multi_objective = config.use_multi_objective  # Use config default
-    
-    use_adx_regime = args.adx or config.use_adx_regime_filter
-    early_stopping_patience = args.patience
-    
-    # Set optimization mode for output directory structure
+    # Initialize OutputManager for structured logging
     optimization_mode = "NSGA" if use_multi_objective else "TPE"
-    
-    # Initialize output manager with correct mode BEFORE any optimization runs
-    from tradr.utils.output_manager import set_output_manager
     set_output_manager(optimization_mode=optimization_mode)
-
+    output_mgr = get_output_manager()
+    
     print(f"\n{'='*80}")
-    print("FTMO PROFESSIONAL OPTIMIZATION SYSTEM - UNIFIED CONFIG V3")
+    print("FTMO PROFESSIONAL OPTIMIZATION SYSTEM - REGIME-ADAPTIVE V2")
     print(f"{'='*80}")
-    
-    # Show active config
-    print(f"\n📋 Configuration (from params/optimization_config.json):")
-    print(f"  Database: {config.db_path}")
-    print(f"  Study: {config.study_name}")
-    print(f"  Output Directory: ftmo_analysis_output/{optimization_mode}/")
-    print(f"  Multi-objective: {'✅ Enabled' if use_multi_objective else '❌ Disabled'}")
-    print(f"  ADX Regime Filter: {'✅ Enabled' if use_adx_regime else '❌ Disabled'}")
-    
-    print(f"\n📊 Data Partitioning (Multi-Year Robustness):")
+    print(f"\nData Partitioning (Multi-Year Robustness):")
     print(f"  TRAINING:    2023-01-01 to 2024-09-30 (in-sample)")
     print(f"  VALIDATION:  2024-10-01 to {VALIDATION_END.strftime('%Y-%m-%d')} (out-of-sample)")
     print(f"  FINAL:       Full 2023-2025 (December fully open)")
-    
-    if use_adx_regime:
-        print(f"\n⚙️  Regime-Adaptive Trading:")
-        print(f"  TREND MODE:      ADX >= threshold (momentum following)")
-        print(f"  RANGE MODE:      ADX < threshold (conservative mean reversion)")
-        print(f"  TRANSITION:      NO ENTRIES (wait for regime confirmation)")
-    
-    print(f"\n⏱️  Early Stopping: After {early_stopping_patience} trials without improvement")
+    print(f"\nRegime-Adaptive V2 Trading System:")
+    print(f"  TREND MODE:      ADX >= threshold (momentum following)")
+    print(f"  RANGE MODE:      ADX < threshold (conservative mean reversion)")
+    print(f"  TRANSITION:      NO ENTRIES (wait for regime confirmation)")
     
     if use_multi_objective:
-        print(f"\n🎯 OPTIMIZATION MODE: NSGA-II Multi-Objective")
-        print(f"   Objectives: {', '.join(config.objectives)}")
+        print(f"\n🎯 MULTI-OBJECTIVE MODE: NSGA-II Pareto Optimization")
+        print(f"   Objectives: Total R, Sharpe Ratio, Win Rate (all maximized)")
         print(f"   Sampler: NSGA-II (evolutionary algorithm)")
     else:
-        print(f"\n📈 OPTIMIZATION MODE: TPE Single-Objective")
+        print(f"\n📊 SINGLE-OBJECTIVE MODE: Composite Score Optimization")
         print(f"   Score = R + Sharpe_bonus + PF_bonus + WR_bonus - penalties")
     
-    print(f"\n💾 Resumable: Study stored in {config.db_path}")
+    print(f"\nResumable: Study stored in {OPTUNA_DB_PATH}")
     print(f"{'='*80}\n")
     
     # ============================================================================
@@ -2603,13 +2372,9 @@ def main():
         best_params = results.get('best_params', {})
     else:
         optimizer = OptunaOptimizer()
-        results = optimizer.run_optimization(n_trials=n_trials, early_stopping_patience=early_stopping_patience)
+        results = optimizer.run_optimization(n_trials=n_trials)
         study = results.get('study')
         best_params = results.get('best_params', optimizer.best_params)
-        
-        # Log early stopping info
-        if results.get('early_stopped', False):
-            print(f"\n⏹️  Optimization early stopped after {results.get('trials_without_improvement', 0)} trials without improvement")
     
     # ============================================================================
     # TOP 5 VALIDATION COMPARISON
@@ -2625,18 +2390,15 @@ def main():
             best_oos = top_5_results[0]
             best_params = best_oos['params']
             validation_trades = best_oos['validation_trade_objects']
-            validation_compliance = best_oos.get('validation_compliance', {})
             
             print(f"\n✅ Selected Trial #{best_oos['trial_number']} as FINAL (best OOS performance)")
         else:
             # Fallback to best training params
             best_params = results['best_params']
             validation_trades = []
-            validation_compliance = {}
     else:
         best_params = results['best_params']
         validation_trades = []
-        validation_compliance = {}
     
     # INSTANTLY SAVE BEST PARAMS FOR LIVE BOT
     save_best_params_persistent(best_params)
@@ -2648,21 +2410,22 @@ def main():
     print(f"\n{'='*80}")
     print("=== FULL PERIOD FINAL RESULTS (2023-2025) ===")
     print(f"{'='*80}")
-    print("Running training period backtest...")
+    print("Running full period backtest with best OOS parameters...")
+    print("December fully open for trading")
     
-    # Run training period backtest
-    training_trades, training_compliance = run_full_period_backtest(
-        start_date=TRAINING_START,
-        end_date=TRAINING_END,
+    full_year_trades = run_full_period_backtest(
+        start_date=FULL_PERIOD_START,
+        end_date=FULL_PERIOD_END,
         min_confluence=best_params.get('min_confluence_score', 3),
         min_quality_factors=best_params.get('min_quality_factors', 2),
         risk_per_trade_pct=best_params.get('risk_per_trade_pct', 0.5),
         atr_min_percentile=best_params.get('atr_min_percentile', 60.0),
         trail_activation_r=best_params.get('trail_activation_r', 2.2),
+        december_atr_multiplier=best_params.get('december_atr_multiplier', 1.5),
         volatile_asset_boost=best_params.get('volatile_asset_boost', 1.5),
         ml_min_prob=None,
-        require_adx_filter=False,  # DISABLED
-        use_adx_regime_filter=use_adx_regime,
+        require_adx_filter=True,
+        use_adx_regime_filter=False,
         adx_trend_threshold=best_params.get('adx_trend_threshold', 25.0),
         adx_range_threshold=best_params.get('adx_range_threshold', 20.0),
         trend_min_confluence=best_params.get('trend_min_confluence', 6),
@@ -2671,78 +2434,25 @@ def main():
         atr_trail_multiplier=best_params.get('atr_trail_multiplier', 1.5),
         partial_exit_at_1r=best_params.get('partial_exit_at_1r', True),
         partial_exit_pct=best_params.get('partial_exit_pct', 0.5),
-        enable_compliance_tracking=True,
-        tp1_r_multiple=best_params.get('tp1_r_multiple', 1.2),
-        tp2_r_multiple=best_params.get('tp2_r_multiple', 2.0),
-        tp3_r_multiple=best_params.get('tp3_r_multiple', 3.5),
-        tp1_close_pct=best_params.get('tp1_close_pct', 0.35),
-        tp2_close_pct=best_params.get('tp2_close_pct', 0.35),
-        tp3_close_pct=best_params.get('tp3_close_pct', 0.25),
-        use_htf_filter=best_params.get('use_htf_filter', False),
-        use_structure_filter=best_params.get('use_structure_filter', False),
-        use_fib_filter=best_params.get('use_fib_filter', False),
-        use_confirmation_filter=best_params.get('use_confirmation_filter', False),
-        use_displacement_filter=best_params.get('use_displacement_filter', False),
-        use_candle_rejection=best_params.get('use_candle_rejection', False),
     )
     
-    print("Running validation period backtest...")
-    
-    # Run validation period backtest (if not already from top_5_results)
-    if not validation_trades:
-        validation_trades, validation_compliance = run_full_period_backtest(
-            start_date=VALIDATION_START,
-            end_date=VALIDATION_END,
-            min_confluence=best_params.get('min_confluence_score', 3),
-            min_quality_factors=best_params.get('min_quality_factors', 2),
-            risk_per_trade_pct=best_params.get('risk_per_trade_pct', 0.5),
-            atr_min_percentile=best_params.get('atr_min_percentile', 60.0),
-            trail_activation_r=best_params.get('trail_activation_r', 2.2),
-            volatile_asset_boost=best_params.get('volatile_asset_boost', 1.5),
-            ml_min_prob=None,
-            require_adx_filter=False,  # DISABLED
-            use_adx_regime_filter=use_adx_regime,
-            adx_trend_threshold=best_params.get('adx_trend_threshold', 25.0),
-            adx_range_threshold=best_params.get('adx_range_threshold', 20.0),
-            trend_min_confluence=best_params.get('trend_min_confluence', 6),
-            range_min_confluence=best_params.get('range_min_confluence', 5),
-            atr_volatility_ratio=best_params.get('atr_vol_ratio_range', 0.8),
-            atr_trail_multiplier=best_params.get('atr_trail_multiplier', 1.5),
-            partial_exit_at_1r=best_params.get('partial_exit_at_1r', True),
-            partial_exit_pct=best_params.get('partial_exit_pct', 0.5),
-            enable_compliance_tracking=True,
-            tp1_r_multiple=best_params.get('tp1_r_multiple', 1.2),
-            tp2_r_multiple=best_params.get('tp2_r_multiple', 2.0),
-            tp3_r_multiple=best_params.get('tp3_r_multiple', 3.5),
-            tp1_close_pct=best_params.get('tp1_close_pct', 0.35),
-            tp2_close_pct=best_params.get('tp2_close_pct', 0.35),
-            tp3_close_pct=best_params.get('tp3_close_pct', 0.25),
-            use_htf_filter=best_params.get('use_htf_filter', False),
-            use_structure_filter=best_params.get('use_structure_filter', False),
-            use_fib_filter=best_params.get('use_fib_filter', False),
-            use_confirmation_filter=best_params.get('use_confirmation_filter', False),
-            use_displacement_filter=best_params.get('use_displacement_filter', False),
-            use_candle_rejection=best_params.get('use_candle_rejection', False),
-        )
-    
-    # Combine training + validation for full period (ensures consistency)
-    print("Combining training + validation for full period...")
-    full_year_trades = training_trades + validation_trades
-    full_year_trades.sort(key=lambda t: t.entry_date if hasattr(t, 'entry_date') else t.get('entry_date', ''))
+    # Extract training trades from full period for reporting
+    training_trades = [t for t in full_year_trades if hasattr(t, 'entry_date') and 
+                       TRAINING_START <= (t.entry_date.replace(tzinfo=None) if hasattr(t.entry_date, 'replace') and t.entry_date.tzinfo else t.entry_date) <= TRAINING_END]
     
     risk_pct = best_params.get('risk_per_trade_pct', 0.5)
     
-    # Use OutputManager for structured CSV exports (to mode-specific directory)
-    print("\n📊 Exporting final CSV files via OutputManager...")
-    om = get_output_manager()
-    om.save_best_trial_trades(
+    # Export all three CSV files using OutputManager (writes to TPE/ or NSGA/ directory)
+    print("\n📊 Exporting final CSV files to mode-specific directory...")
+    output_mgr = get_output_manager()
+    output_mgr.save_best_trial_trades(
         training_trades=training_trades,
         validation_trades=validation_trades if validation_trades else [],
         final_trades=full_year_trades,
         risk_pct=risk_pct,
     )
-    om.generate_monthly_stats(full_year_trades, "final", risk_pct)
-    om.generate_symbol_performance(full_year_trades, risk_pct)
+    output_mgr.generate_monthly_stats(full_year_trades, "final", risk_pct)
+    output_mgr.generate_symbol_performance(full_year_trades, risk_pct)
     print("✅ All CSV files exported successfully\n")
     
     full_year_results = print_period_results(
@@ -2833,59 +2543,23 @@ def main():
     # Generate Professional Report
     print(f"\n  Generating professional report...")
     try:
-        # Use OutputManager for final report (CSV format for AI analysis)
-        om = get_output_manager()
-        risk_pct = best_params.get('risk_per_trade_pct', 0.5)
-        risk_per_trade = ACCOUNT_SIZE * (risk_pct / 100)
-        
-        # Calculate profit USD for each period
-        training_profit = sum(getattr(t, 'rr', 0) for t in training_trades) * risk_per_trade if training_trades else 0
-        validation_profit = sum(getattr(t, 'rr', 0) for t in validation_trades) * risk_per_trade if validation_trades else 0
-        final_profit = sum(getattr(t, 'rr', 0) for t in full_year_trades) * risk_per_trade if full_year_trades else 0
-        
-        # Convert USD returns to R-multiples (total_return is now in USD)
-        training_r = training_risk_metrics.total_return / risk_per_trade if risk_per_trade > 0 else 0
-        validation_r = validation_risk_metrics.total_return / risk_per_trade if risk_per_trade > 0 else 0
-        final_r = full_risk_metrics.total_return / risk_per_trade if risk_per_trade > 0 else 0
-        
-        training_dict = {
-            'total_r': training_r,
-            'sharpe': training_risk_metrics.sharpe_ratio,
-            'sortino': training_risk_metrics.sortino_ratio,
-            'win_rate': training_risk_metrics.win_rate,  # Already a percentage (e.g., 47.0)
-            'profit_usd': training_profit,
-            'total_trades': len(training_trades) if training_trades else 0,
-            'max_drawdown': training_risk_metrics.max_drawdown,
-        }
-        validation_dict = {
-            'total_r': validation_r,
-            'sharpe': validation_risk_metrics.sharpe_ratio,
-            'sortino': validation_risk_metrics.sortino_ratio,
-            'win_rate': validation_risk_metrics.win_rate,  # Already a percentage (e.g., 51.0)
-            'profit_usd': validation_profit,
-            'total_trades': len(validation_trades) if validation_trades else 0,
-            'max_drawdown': validation_risk_metrics.max_drawdown,
-        }
-        final_dict = {
-            'total_r': final_r,
-            'sharpe': full_risk_metrics.sharpe_ratio,
-            'sortino': full_risk_metrics.sortino_ratio,
-            'win_rate': full_risk_metrics.win_rate,  # Already a percentage (e.g., 49.0)
-            'profit_usd': final_profit,
-            'total_trades': len(full_year_trades) if full_year_trades else 0,
-            'max_drawdown': full_risk_metrics.max_drawdown,
-        }
-        
-        om.generate_final_report(
+        report_text = generate_professional_report(
             best_params=best_params,
-            training_metrics=training_dict,
-            validation_metrics=validation_dict,
-            final_metrics=final_dict,
-            total_trials=results.get('total_trials', results['n_trials']),
+            training_metrics=training_risk_metrics,
+            validation_metrics=validation_risk_metrics,
+            full_metrics=full_risk_metrics,
+            walk_forward_results=wf_results,
+            output_file=OUTPUT_DIR / "professional_backtest_report.txt"
         )
-        print(f"  ✓ Report saved to: ftmo_analysis_output/optimization_report.csv")
+        print(f"  ✓ Report saved to: ftmo_analysis_output/professional_backtest_report.txt")
     except Exception as e:
         print(f"  [!] Report generation failed: {e}")
+    
+    # ============================================================================
+    # ARCHIVE THIS RUN TO HISTORY
+    # ============================================================================
+    output_mgr = get_output_manager()
+    output_mgr.archive_current_run()
     
     print(f"\n{'='*80}")
     print("FINAL SUMMARY")
@@ -2893,20 +2567,30 @@ def main():
     print(f"\nBest Score: {results['best_score']:.2f}")
     print(f"Trials Run This Session: {results['n_trials']}")
     print(f"Total Trials in Study: {results.get('total_trials', results['n_trials'])}")
-    print(f"\nFiles Created:")
+    print(f"\nFiles Created in ftmo_analysis_output/{optimization_mode}/:")
+    print(f"  - best_trades_training.csv")
+    print(f"  - best_trades_validation.csv")
+    print(f"  - best_trades_final.csv ({len(full_year_trades) if full_year_trades else 0} trades)")
+    print(f"  - monthly_stats.csv")
+    print(f"  - symbol_performance.csv")
+    print(f"  - optimization.log")
+    print(f"  - optimization_report.csv")
+    print(f"\nAlso created:")
     print(f"  - params/current_params.json (optimized parameters)")
-    print(f"  - ftmo_analysis_output/best_trades_*.csv (training/validation/final trades)")
-    print(f"  - ftmo_analysis_output/monthly_stats.csv (monthly breakdown)")
-    print(f"  - ftmo_analysis_output/symbol_performance.csv (per-symbol stats)")
-    print(f"  - ftmo_analysis_output/optimization.log (trial history)")
-    print(f"  - ftmo_analysis_output/optimization_report.csv (final report)")
-    print(f"  - {config.db_path} (resumable optimization state)")
+    print(f"  - {OPTUNA_DB_PATH} (resumable optimization state)")
+    print(f"  - ftmo_optimization_progress.txt (progress log)")
     
-    # Archive this run to history at the END
-    om = get_output_manager()
-    om.archive_current_run()
+    print(f"\n✅ Optimization complete and archived to history/")
+
     
-    print(f"\n✅ Optimization complete. Ready for live trading.")
+    summary_file = generate_summary_txt(
+        results=results,
+        training_trades=training_trades,
+        validation_trades=validation_trades,
+        full_year_trades=full_year_trades,
+        best_params=best_params
+    )
+    print(f"\nSummary saved to: {summary_file}")
 
 
 if __name__ == "__main__":
