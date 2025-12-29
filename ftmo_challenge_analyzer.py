@@ -2547,10 +2547,10 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
     """
     from datetime import datetime
 
-    # Parse dates
+    # Parse dates - keep as datetime objects (not date) for load_ohlcv_data compatibility
     try:
-        val_start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
-        val_end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        val_start = datetime.strptime(start_date_str, "%Y-%m-%d")
+        val_end = datetime.strptime(end_date_str, "%Y-%m-%d")
     except ValueError as e:
         print(f"❌ Error parsing dates: {e}")
         print("   Use format: YYYY-MM-DD")
@@ -2569,7 +2569,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
     print("FTMO PARAMETER VALIDATION MODE")
     print(f"{'='*80}")
     print(f"\n📊 Testing parameters from: {params_file}")
-    print(f"📅 Validation Period: {val_start} to {val_end}")
+    print(f"📅 Validation Period: {val_start.strftime('%Y-%m-%d')} to {val_end.strftime('%Y-%m-%d')}")
     print(f"\nLoaded Parameters:")
     for k, v in sorted(best_params.items())[:15]:  # Show first 15 params
         if isinstance(v, float):
@@ -2596,9 +2596,9 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
     validation_start_date = training_end_date + timedelta(days=1)
 
     print(f"Data Partitioning for {year_start}-{year_end}:")
-    print(f"  TRAINING:    {val_start} to {training_end_date} ({training_days} days, 70%)")
-    print(f"  VALIDATION:  {validation_start_date} to {val_end} ({total_days - training_days} days, 30%)")
-    print(f"  FULL PERIOD: {val_start} to {val_end} ({total_days} days)")
+    print(f"  TRAINING:    {val_start.strftime('%Y-%m-%d')} to {training_end_date.strftime('%Y-%m-%d')} ({training_days} days, 70%)")
+    print(f"  VALIDATION:  {validation_start_date.strftime('%Y-%m-%d')} to {val_end.strftime('%Y-%m-%d')} ({total_days - training_days} days, 30%)")
+    print(f"  FULL PERIOD: {val_start.strftime('%Y-%m-%d')} to {val_end.strftime('%Y-%m-%d')} ({total_days} days)")
     print()
 
     # Run backtests on all three periods
@@ -2637,7 +2637,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
     consec_halt = best_params.get('consecutive_loss_halt', 999)
 
     # Training period backtest
-    print(f"\n📈 TRAINING PERIOD: {val_start} to {training_end_date}")
+    print(f"\n📈 TRAINING PERIOD: {val_start.strftime('%Y-%m-%d')} to {training_end_date.strftime('%Y-%m-%d')}")
     training_trades = run_full_period_backtest(
         start_date=val_start,
         end_date=training_end_date,
@@ -2648,6 +2648,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
         trail_activation_r=trail_r,
         december_atr_multiplier=dec_atr,
         volatile_asset_boost=vol_boost,
+        require_adx_filter=False,  # Disable for validation mode
         adx_trend_threshold=adx_trend,
         adx_range_threshold=adx_range,
         trend_min_confluence=trend_conf,
@@ -2674,7 +2675,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
     )
 
     # Validation period backtest
-    print(f"\n📈 VALIDATION PERIOD: {validation_start_date} to {val_end}")
+    print(f"\n📈 VALIDATION PERIOD: {validation_start_date.strftime('%Y-%m-%d')} to {val_end.strftime('%Y-%m-%d')}")
     validation_trades = run_full_period_backtest(
         start_date=validation_start_date,
         end_date=val_end,
@@ -2685,6 +2686,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
         trail_activation_r=trail_r,
         december_atr_multiplier=dec_atr,
         volatile_asset_boost=vol_boost,
+        require_adx_filter=False,  # Disable for validation mode
         adx_trend_threshold=adx_trend,
         adx_range_threshold=adx_range,
         trend_min_confluence=trend_conf,
@@ -2711,7 +2713,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
     )
 
     # Full period backtest
-    print(f"\n📈 FULL PERIOD: {val_start} to {val_end}")
+    print(f"\n📈 FULL PERIOD: {val_start.strftime('%Y-%m-%d')} to {val_end.strftime('%Y-%m-%d')}")
     full_trades = run_full_period_backtest(
         start_date=val_start,
         end_date=val_end,
@@ -2722,6 +2724,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
         trail_activation_r=trail_r,
         december_atr_multiplier=dec_atr,
         volatile_asset_boost=vol_boost,
+        require_adx_filter=False,  # Disable for validation mode
         adx_trend_threshold=adx_trend,
         adx_range_threshold=adx_range,
         trend_min_confluence=trend_conf,
@@ -2762,7 +2765,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
             wins = sum(1 for t in trades if getattr(t, 'rr', 0) > 0)
             win_rate = (wins / len(trades) * 100) if trades else 0
             profit_usd = total_r * (risk_pct / 100) * 200000
-            print(f"\n{period_name_str} ({start} to {end}):")
+            print(f"\n{period_name_str} ({start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}):")
             print(f"   Trades: {len(trades)}")
             print(f"   Total R: {total_r:+.2f}")
             print(f"   Win Rate: {win_rate:.1f}%")
@@ -2783,7 +2786,13 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
     output_mgr.save_best_params(best_params)
 
     # Generate summary
-    generate_analysis_summary(
+    validation_results = {
+        'best_score': 0,
+        'n_trials': 1,
+        'total_trials': 1,
+    }
+    generate_summary_txt(
+        results=validation_results,
         training_trades=training_trades,
         validation_trades=validation_trades,
         full_year_trades=full_trades,
