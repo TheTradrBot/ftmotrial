@@ -71,12 +71,12 @@ def load_strategy_params():
         fib_low=data.get("fib_low", 0.382),
         fib_high=data.get("fib_high", 0.886),
         structure_sl_lookback=data.get("structure_sl_lookback", 35),
-        liquidity_sweep_lookback=data.get("liquidity_sweep_lookback", 12),
-        use_htf_filter=data.get("use_htf_filter", True),
-        use_structure_filter=data.get("use_structure_filter", True),
-        use_liquidity_filter=data.get("use_liquidity_filter", True),
-        use_fib_filter=data.get("use_fib_filter", True),
-        use_confirmation_filter=data.get("use_confirmation_filter", True),
+        # REMOVED: liquidity_sweep_lookback - doesn't exist in StrategyParams
+        use_htf_filter=data.get("use_htf_filter", False),  # DISABLED by default for baseline
+        use_structure_filter=data.get("use_structure_filter", False),  # DISABLED by default
+        # REMOVED: use_liquidity_filter - doesn't exist in StrategyParams
+        use_fib_filter=data.get("use_fib_filter", False),  # DISABLED by default
+        use_confirmation_filter=data.get("use_confirmation_filter", False),  # DISABLED by default
         require_htf_alignment=data.get("require_htf_alignment", False),
         require_confirmation_for_active=data.get("require_confirmation_for_active", True),
         require_rr_for_active=data.get("require_rr_for_active", True),
@@ -89,11 +89,27 @@ def load_strategy_params():
         tp3_close_pct=data.get("tp3_close_pct", 0.15),
         tp4_close_pct=data.get("tp4_close_pct", 0.20),
         tp5_close_pct=data.get("tp5_close_pct", 0.45),
-        use_atr_regime_filter=data.get("use_atr_regime_filter", True),
+        use_atr_regime_filter=data.get("use_atr_regime_filter", False),  # DISABLED by default
         atr_min_percentile=data.get("atr_min_percentile", 60.0),
-        use_zscore_filter=data.get("use_zscore_filter", True),
+        use_zscore_filter=data.get("use_zscore_filter", False),  # DISABLED by default
         zscore_threshold=data.get("zscore_threshold", 1.5),
-        use_pattern_filter=data.get("use_pattern_filter", True),
+        use_pattern_filter=data.get("use_pattern_filter", False),  # DISABLED by default
+        # Regime Adaptive V2 parameters
+        adx_trend_threshold=data.get("adx_trend_threshold", 25.0),
+        adx_range_threshold=data.get("adx_range_threshold", 20.0),
+        trend_min_confluence=data.get("trend_min_confluence", 4),
+        range_min_confluence=data.get("range_min_confluence", 3),
+        partial_exit_at_1r=data.get("partial_exit_at_1r", True),
+        partial_exit_pct=data.get("partial_exit_pct", 0.5),
+        atr_trail_multiplier=data.get("atr_trail_multiplier", 1.5),
+        trail_activation_r=data.get("trail_activation_r", 2.2),
+        december_atr_multiplier=data.get("december_atr_multiplier", 1.5),
+        volatile_asset_boost=data.get("volatile_asset_boost", 1.5),
+        # Blueprint V2 filters
+        use_mitigated_sr=data.get("use_mitigated_sr", False),
+        use_structural_framework=data.get("use_structural_framework", False),
+        use_displacement_filter=data.get("use_displacement_filter", False),
+        use_candle_rejection=data.get("use_candle_rejection", False),
     )
 
 

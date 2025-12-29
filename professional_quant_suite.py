@@ -153,10 +153,12 @@ def calculate_risk_metrics(trades: List[Any],
     else:
         sortino = 0
     
-    # Calmar ratio (return / max drawdown)
-    calmar = (annual_return / max_drawdown) if max_drawdown > 0 else 0
+    # Calmar ratio (return / max drawdown) - FIXED: Convert drawdown to percentage
+    # max_drawdown is in USD, we need it as percentage of account for correct Calmar
+    max_drawdown_pct = (max_drawdown / account_size) * 100 if account_size > 0 else 0
+    calmar = (annual_return / max_drawdown_pct) if max_drawdown_pct > 0 else 0
     
-    # Recovery factor
+    # Recovery factor (total return / max drawdown in same units - USD)
     recovery_factor = (total_return / max_drawdown) if max_drawdown > 0 else 0
     
     # Consecutive winners/losers
@@ -192,7 +194,7 @@ def calculate_risk_metrics(trades: List[Any],
     max_consecutive_losses = max(consecutive_losses) if consecutive_losses else 0
     
     return RiskMetrics(
-        total_return=total_return_pct,
+        total_return=total_return,  # FIXED: Return USD value, not percentage
         annual_return=annual_return,
         sharpe_ratio=sharpe,
         sortino_ratio=sortino,

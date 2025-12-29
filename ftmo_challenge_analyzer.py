@@ -876,6 +876,30 @@ def run_full_period_backtest(
     partial_exit_pct: float = 0.5,  # % to close at 1R
     use_adx_slope_rising: bool = False,  # Enable ADX slope rising early trend detection
     atr_vol_ratio_range: float = 0.8,  # ATR volatility ratio for range mode filter
+    # ============================================================================
+    # NEW: TAKE PROFIT PARAMETERS
+    # ============================================================================
+    tp1_r_multiple: float = 1.0,  # TP1 R-multiple
+    tp2_r_multiple: float = 2.0,  # TP2 R-multiple
+    tp3_r_multiple: float = 3.0,  # TP3 R-multiple
+    tp1_close_pct: float = 0.20,  # % to close at TP1
+    tp2_close_pct: float = 0.20,  # % to close at TP2
+    tp3_close_pct: float = 0.20,  # % to close at TP3
+    # ============================================================================
+    # NEW: FILTER TOGGLES
+    # ============================================================================
+    use_htf_filter: bool = False,
+    use_structure_filter: bool = False,
+    use_confirmation_filter: bool = False,
+    use_fib_filter: bool = False,
+    use_displacement_filter: bool = False,
+    use_candle_rejection: bool = False,
+    # ============================================================================
+    # NEW: FTMO COMPLIANCE PARAMETERS
+    # ============================================================================
+    daily_loss_halt_pct: float = 4.0,
+    max_total_dd_warning: float = 8.0,
+    consecutive_loss_halt: int = 999,  # 999 = disabled
 ) -> List[Trade]:
     """
     Run backtest for a given period with Regime-Adaptive V2 filtering.
@@ -954,7 +978,22 @@ def run_full_period_backtest(
                 volatile_asset_boost=volatile_asset_boost,
                 adx_trend_threshold=adx_trend_threshold,
                 adx_range_threshold=adx_range_threshold,
-                use_adx_regime_filter=use_adx_regime_filter,  # Pass ADX filter toggle to params
+                use_adx_regime_filter=use_adx_regime_filter,
+                # NEW: TP parameters
+                tp1_close_pct=tp1_close_pct,
+                tp2_close_pct=tp2_close_pct,
+                tp3_close_pct=tp3_close_pct,
+                # NEW: Filter toggles
+                use_htf_filter=use_htf_filter,
+                use_structure_filter=use_structure_filter,
+                use_confirmation_filter=use_confirmation_filter,
+                use_fib_filter=use_fib_filter,
+                use_displacement_filter=use_displacement_filter,
+                use_candle_rejection=use_candle_rejection,
+                # ATR and trail
+                atr_trail_multiplier=atr_trail_multiplier,
+                partial_exit_at_1r=partial_exit_at_1r,
+                partial_exit_pct=partial_exit_pct,
             )
             
             trades = simulate_trades(
@@ -1288,27 +1327,96 @@ class OptunaOptimizer:
         - Partial profit taking and trail management
         """
         # ============================================================================
-        # REGIME-ADAPTIVE V2 EXPANDED PARAMETER SEARCH SPACE (20+ Parameters)
+        # REGIME-ADAPTIVE V2 EXPANDED PARAMETER SEARCH SPACE (35+ Parameters)
         # ============================================================================
-        # AGGRESSIVELY LOOSENED PARAMETERS FOR MAXIMUM TRADE GENERATION
+        # COMPLETE PARAMETER SPACE including TP system, filter toggles, FTMO compliance
         # Goal: Generate 200+ trades in training period + meaningful validation trades
         params = {
+            # === CORE RISK & CONFLUENCE PARAMETERS ===
             'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.3, 0.8, step=0.05),
-            'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 4),  # ULTRA-LOOSE: 2-4 (was 3-5)
-            'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 2),    # LOOSEN: 1-2 (was 1-3)
-            'adx_trend_threshold': trial.suggest_float('adx_trend_threshold', 15.0, 24.0, step=1.0),  # Allow much lower ADX
-            'adx_range_threshold': trial.suggest_float('adx_range_threshold', 10.0, 18.0, step=1.0),  # Allow lower range mode ADX
-            'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),   # Allow as low as 3
-            'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),   # Allow 2+
+            'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 4),  # ULTRA-LOOSE: 2-4
+            'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 2),    # LOOSEN: 1-2
+            
+            # === ADX REGIME PARAMETERS ===
+            'adx_trend_threshold': trial.suggest_float('adx_trend_threshold', 15.0, 24.0, step=1.0),
+            'adx_range_threshold': trial.suggest_float('adx_range_threshold', 10.0, 18.0, step=1.0),
+            'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),
+            'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),
+            
+            # === ATR & TRAIL PARAMETERS ===
             'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.2, 3.5, step=0.2),
             'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
+            'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=5.0),
+            'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.2),
+            
+            # === PARTIAL EXIT PARAMETERS ===
             'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', [True, False]),
             'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.8, step=0.05),
-            'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=5.0),  # AGGRESSIVELY LOOSEN!
-            'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.2),
+            
+            # === SEASONAL PARAMETERS ===
             'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.1),
             'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.1),
+            
+            # ============================================================================
+            # NEW: TAKE PROFIT R-MULTIPLES (must maintain TP1 < TP2 < TP3)
+            # ============================================================================
+            'tp1_r_multiple': trial.suggest_float('tp1_r_multiple', 1.0, 2.0, step=0.25),
+            'tp2_r_multiple': trial.suggest_float('tp2_r_multiple', 2.0, 4.0, step=0.5),
+            'tp3_r_multiple': trial.suggest_float('tp3_r_multiple', 3.5, 6.0, step=0.5),
+            
+            # ============================================================================
+            # NEW: TAKE PROFIT CLOSE PERCENTAGES (sum should be <= 0.85)
+            # ============================================================================
+            'tp1_close_pct': trial.suggest_float('tp1_close_pct', 0.15, 0.40, step=0.05),
+            'tp2_close_pct': trial.suggest_float('tp2_close_pct', 0.10, 0.30, step=0.05),
+            'tp3_close_pct': trial.suggest_float('tp3_close_pct', 0.10, 0.25, step=0.05),
+            
+            # ============================================================================
+            # NEW: FILTER TOGGLES (all disabled by default for baseline)
+            # ============================================================================
+            # Bundle A: Core Entry Filters
+            'use_htf_filter': trial.suggest_categorical('use_htf_filter', [False]),  # DISABLED: baseline
+            'use_structure_filter': trial.suggest_categorical('use_structure_filter', [False]),  # DISABLED
+            'use_confirmation_filter': trial.suggest_categorical('use_confirmation_filter', [False]),  # DISABLED
+            
+            # Bundle B: Precision Entry Filters
+            'use_fib_filter': trial.suggest_categorical('use_fib_filter', [False]),  # DISABLED: baseline
+            'use_displacement_filter': trial.suggest_categorical('use_displacement_filter', [False]),  # DISABLED
+            'use_candle_rejection': trial.suggest_categorical('use_candle_rejection', [False]),  # DISABLED
+            
+            # ============================================================================
+            # NEW: FTMO COMPLIANCE PARAMETERS
+            # ============================================================================
+            'daily_loss_halt_pct': trial.suggest_float('daily_loss_halt_pct', 3.5, 4.5, step=0.1),
+            'max_total_dd_warning': trial.suggest_float('max_total_dd_warning', 7.0, 9.0, step=0.5),
+            'consecutive_loss_halt': trial.suggest_int('consecutive_loss_halt', 5, 999),  # 999 = disabled
         }
+        
+        # ============================================================================
+        # VALIDATION CONSTRAINTS: Reject invalid parameter combinations
+        # ============================================================================
+        
+        # TP R-Multiple monotonic constraint: TP1 < TP2 < TP3
+        if not (params['tp1_r_multiple'] < params['tp2_r_multiple'] < params['tp3_r_multiple']):
+            trial.set_user_attr('rejection_reason', 'TP R-multiples not ascending')
+            trial.set_user_attr('quarterly_stats', {})
+            trial.set_user_attr('overall_stats', {'trades': 0, 'profit': 0, 'win_rate': 0})
+            return -999999.0
+        
+        # TP Close percentage sum constraint: tp1 + tp2 + tp3 <= 0.85
+        total_close_pct = params['tp1_close_pct'] + params['tp2_close_pct'] + params['tp3_close_pct']
+        if total_close_pct > 0.85:
+            trial.set_user_attr('rejection_reason', f'TP close sum {total_close_pct:.2f} > 0.85')
+            trial.set_user_attr('quarterly_stats', {})
+            trial.set_user_attr('overall_stats', {'trades': 0, 'profit': 0, 'win_rate': 0})
+            return -999999.0
+        
+        # ADX threshold constraint: range < trend
+        if params['adx_range_threshold'] >= params['adx_trend_threshold']:
+            trial.set_user_attr('rejection_reason', 'ADX range >= trend threshold')
+            trial.set_user_attr('quarterly_stats', {})
+            trial.set_user_attr('overall_stats', {'trades': 0, 'profit': 0, 'win_rate': 0})
+            return -999999.0
         
         training_trades = run_full_period_backtest(
             start_date=TRAINING_START,
@@ -1333,6 +1441,24 @@ class OptunaOptimizer:
             atr_trail_multiplier=params['atr_trail_multiplier'],
             partial_exit_at_1r=params['partial_exit_at_1r'],
             partial_exit_pct=params['partial_exit_pct'],
+            # NEW: TP parameters
+            tp1_r_multiple=params['tp1_r_multiple'],
+            tp2_r_multiple=params['tp2_r_multiple'],
+            tp3_r_multiple=params['tp3_r_multiple'],
+            tp1_close_pct=params['tp1_close_pct'],
+            tp2_close_pct=params['tp2_close_pct'],
+            tp3_close_pct=params['tp3_close_pct'],
+            # NEW: Filter toggles
+            use_htf_filter=params['use_htf_filter'],
+            use_structure_filter=params['use_structure_filter'],
+            use_confirmation_filter=params['use_confirmation_filter'],
+            use_fib_filter=params['use_fib_filter'],
+            use_displacement_filter=params['use_displacement_filter'],
+            use_candle_rejection=params['use_candle_rejection'],
+            # NEW: FTMO compliance
+            daily_loss_halt_pct=params['daily_loss_halt_pct'],
+            max_total_dd_warning=params['max_total_dd_warning'],
+            consecutive_loss_halt=params['consecutive_loss_halt'],
         )
         
         if not training_trades or len(training_trades) == 0:
@@ -1910,6 +2036,24 @@ def validate_top_trials(study, top_n: int = 5) -> List[Dict]:
             atr_trail_multiplier=params.get('atr_trail_multiplier', 1.5),
             partial_exit_at_1r=params.get('partial_exit_at_1r', True),
             partial_exit_pct=params.get('partial_exit_pct', 0.5),
+            # NEW: TP parameters
+            tp1_r_multiple=params.get('tp1_r_multiple', 1.0),
+            tp2_r_multiple=params.get('tp2_r_multiple', 2.0),
+            tp3_r_multiple=params.get('tp3_r_multiple', 3.0),
+            tp1_close_pct=params.get('tp1_close_pct', 0.20),
+            tp2_close_pct=params.get('tp2_close_pct', 0.20),
+            tp3_close_pct=params.get('tp3_close_pct', 0.20),
+            # NEW: Filter toggles
+            use_htf_filter=params.get('use_htf_filter', False),
+            use_structure_filter=params.get('use_structure_filter', False),
+            use_confirmation_filter=params.get('use_confirmation_filter', False),
+            use_fib_filter=params.get('use_fib_filter', False),
+            use_displacement_filter=params.get('use_displacement_filter', False),
+            use_candle_rejection=params.get('use_candle_rejection', False),
+            # NEW: FTMO compliance
+            daily_loss_halt_pct=params.get('daily_loss_halt_pct', 4.0),
+            max_total_dd_warning=params.get('max_total_dd_warning', 8.0),
+            consecutive_loss_halt=params.get('consecutive_loss_halt', 999),
         )
         
         # Calculate validation metrics
@@ -2106,22 +2250,68 @@ def multi_objective_function(trial) -> Tuple[float, float, float]:
     """
     # Sample hyperparameters (same as single-objective)
     params = {
-        'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 6),
-        'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 4),
-        'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.3, 0.6, step=0.05),
-        'atr_min_percentile': trial.suggest_float('atr_min_percentile', 40.0, 80.0, step=5.0),
-        'trail_activation_r': trial.suggest_float('trail_activation_r', 0.8, 2.0, step=0.2),
-        'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.2),
-        'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 1.5, step=0.1),
-        'adx_trend_threshold': trial.suggest_int('adx_trend_threshold', 15, 30),
-        'adx_range_threshold': trial.suggest_int('adx_range_threshold', 10, 25),
-        'trend_min_confluence': trial.suggest_int('trend_min_confluence', 2, 5),
+        # === CORE RISK & CONFLUENCE PARAMETERS ===
+        'min_confluence_score': trial.suggest_int('min_confluence_score', 2, 4),
+        'min_quality_factors': trial.suggest_int('min_quality_factors', 1, 2),
+        'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.3, 0.8, step=0.05),
+        
+        # === ADX REGIME PARAMETERS ===
+        'adx_trend_threshold': trial.suggest_float('adx_trend_threshold', 15.0, 24.0, step=1.0),
+        'adx_range_threshold': trial.suggest_float('adx_range_threshold', 10.0, 18.0, step=1.0),
+        'trend_min_confluence': trial.suggest_int('trend_min_confluence', 3, 6),
         'range_min_confluence': trial.suggest_int('range_min_confluence', 2, 5),
-        'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
+        
+        # === ATR & TRAIL PARAMETERS ===
         'atr_trail_multiplier': trial.suggest_float('atr_trail_multiplier', 1.2, 3.5, step=0.2),
+        'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
+        'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=5.0),
+        'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.2),
+        
+        # === PARTIAL EXIT PARAMETERS ===
         'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', [True, False]),
         'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.8, step=0.05),
+        
+        # === SEASONAL PARAMETERS ===
+        'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.1),
+        'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.1),
+        
+        # === TAKE PROFIT R-MULTIPLES ===
+        'tp1_r_multiple': trial.suggest_float('tp1_r_multiple', 1.0, 2.0, step=0.25),
+        'tp2_r_multiple': trial.suggest_float('tp2_r_multiple', 2.0, 4.0, step=0.5),
+        'tp3_r_multiple': trial.suggest_float('tp3_r_multiple', 3.5, 6.0, step=0.5),
+        
+        # === TAKE PROFIT CLOSE PERCENTAGES ===
+        'tp1_close_pct': trial.suggest_float('tp1_close_pct', 0.15, 0.40, step=0.05),
+        'tp2_close_pct': trial.suggest_float('tp2_close_pct', 0.10, 0.30, step=0.05),
+        'tp3_close_pct': trial.suggest_float('tp3_close_pct', 0.10, 0.25, step=0.05),
+        
+        # === FILTER TOGGLES (disabled for baseline) ===
+        'use_htf_filter': trial.suggest_categorical('use_htf_filter', [False]),
+        'use_structure_filter': trial.suggest_categorical('use_structure_filter', [False]),
+        'use_confirmation_filter': trial.suggest_categorical('use_confirmation_filter', [False]),
+        'use_fib_filter': trial.suggest_categorical('use_fib_filter', [False]),
+        'use_displacement_filter': trial.suggest_categorical('use_displacement_filter', [False]),
+        'use_candle_rejection': trial.suggest_categorical('use_candle_rejection', [False]),
+        
+        # === FTMO COMPLIANCE PARAMETERS ===
+        'daily_loss_halt_pct': trial.suggest_float('daily_loss_halt_pct', 3.5, 4.5, step=0.1),
+        'max_total_dd_warning': trial.suggest_float('max_total_dd_warning', 7.0, 9.0, step=0.5),
+        'consecutive_loss_halt': trial.suggest_int('consecutive_loss_halt', 5, 999),
     }
+    
+    # === VALIDATION CONSTRAINTS ===
+    
+    # TP R-Multiple monotonic constraint
+    if not (params['tp1_r_multiple'] < params['tp2_r_multiple'] < params['tp3_r_multiple']):
+        return (-999999.0, -999.0, 0.0)
+    
+    # TP Close sum constraint
+    if params['tp1_close_pct'] + params['tp2_close_pct'] + params['tp3_close_pct'] > 0.85:
+        return (-999999.0, -999.0, 0.0)
+    
+    # ADX threshold constraint
+    if params['adx_range_threshold'] >= params['adx_trend_threshold']:
+        return (-999999.0, -999.0, 0.0)
     
     risk_pct = params['risk_per_trade_pct']
     
@@ -2147,6 +2337,24 @@ def multi_objective_function(trial) -> Tuple[float, float, float]:
         atr_trail_multiplier=params['atr_trail_multiplier'],
         partial_exit_at_1r=params['partial_exit_at_1r'],
         partial_exit_pct=params['partial_exit_pct'],
+        # NEW: TP parameters (use defaults if not in params)
+        tp1_r_multiple=params.get('tp1_r_multiple', 1.0),
+        tp2_r_multiple=params.get('tp2_r_multiple', 2.0),
+        tp3_r_multiple=params.get('tp3_r_multiple', 3.0),
+        tp1_close_pct=params.get('tp1_close_pct', 0.20),
+        tp2_close_pct=params.get('tp2_close_pct', 0.20),
+        tp3_close_pct=params.get('tp3_close_pct', 0.20),
+        # NEW: Filter toggles
+        use_htf_filter=params.get('use_htf_filter', False),
+        use_structure_filter=params.get('use_structure_filter', False),
+        use_confirmation_filter=params.get('use_confirmation_filter', False),
+        use_fib_filter=params.get('use_fib_filter', False),
+        use_displacement_filter=params.get('use_displacement_filter', False),
+        use_candle_rejection=params.get('use_candle_rejection', False),
+        # NEW: FTMO compliance
+        daily_loss_halt_pct=params.get('daily_loss_halt_pct', 4.0),
+        max_total_dd_warning=params.get('max_total_dd_warning', 8.0),
+        consecutive_loss_halt=params.get('consecutive_loss_halt', 999),
     )
     
     # Calculate objectives
@@ -2434,6 +2642,24 @@ def main():
         atr_trail_multiplier=best_params.get('atr_trail_multiplier', 1.5),
         partial_exit_at_1r=best_params.get('partial_exit_at_1r', True),
         partial_exit_pct=best_params.get('partial_exit_pct', 0.5),
+        # NEW: TP parameters
+        tp1_r_multiple=best_params.get('tp1_r_multiple', 1.0),
+        tp2_r_multiple=best_params.get('tp2_r_multiple', 2.0),
+        tp3_r_multiple=best_params.get('tp3_r_multiple', 3.0),
+        tp1_close_pct=best_params.get('tp1_close_pct', 0.20),
+        tp2_close_pct=best_params.get('tp2_close_pct', 0.20),
+        tp3_close_pct=best_params.get('tp3_close_pct', 0.20),
+        # NEW: Filter toggles
+        use_htf_filter=best_params.get('use_htf_filter', False),
+        use_structure_filter=best_params.get('use_structure_filter', False),
+        use_confirmation_filter=best_params.get('use_confirmation_filter', False),
+        use_fib_filter=best_params.get('use_fib_filter', False),
+        use_displacement_filter=best_params.get('use_displacement_filter', False),
+        use_candle_rejection=best_params.get('use_candle_rejection', False),
+        # NEW: FTMO compliance
+        daily_loss_halt_pct=best_params.get('daily_loss_halt_pct', 4.0),
+        max_total_dd_warning=best_params.get('max_total_dd_warning', 8.0),
+        consecutive_loss_halt=best_params.get('consecutive_loss_halt', 999),
     )
     
     # Extract training trades from full period for reporting
