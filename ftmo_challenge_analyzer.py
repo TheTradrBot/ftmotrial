@@ -2530,19 +2530,311 @@ def run_multi_objective_optimization(n_trials: int = 50) -> Dict:
         }
 
 
+def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str = "best_params.json"):
+    """
+    Run validation mode: test existing parameters on a different date range.
+
+    This is used to verify if optimized parameters generalize to other time periods.
+    No optimization is performed - just a single backtest with loaded parameters.
+
+    Args:
+        start_date_str: Start date in YYYY-MM-DD format
+        end_date_str: End date in YYYY-MM-DD format
+        params_file: Path to JSON file with parameters to test
+
+    Usage:
+        python ftmo_challenge_analyzer.py --validate --start 2020-01-01 --end 2022-12-31
+    """
+    from datetime import datetime
+
+    # Parse dates
+    try:
+        val_start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        val_end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+    except ValueError as e:
+        print(f"❌ Error parsing dates: {e}")
+        print("   Use format: YYYY-MM-DD")
+        return
+
+    # Load parameters
+    params_path = Path(params_file)
+    if not params_path.exists():
+        print(f"❌ Error: Parameters file not found: {params_file}")
+        return
+
+    with open(params_path, 'r') as f:
+        best_params = json.load(f)
+
+    print(f"\n{'='*80}")
+    print("FTMO PARAMETER VALIDATION MODE")
+    print(f"{'='*80}")
+    print(f"\n📊 Testing parameters from: {params_file}")
+    print(f"📅 Validation Period: {val_start} to {val_end}")
+    print(f"\nLoaded Parameters:")
+    for k, v in sorted(best_params.items())[:15]:  # Show first 15 params
+        if isinstance(v, float):
+            print(f"   {k}: {v:.4f}")
+        else:
+            print(f"   {k}: {v}")
+    if len(best_params) > 15:
+        print(f"   ... and {len(best_params) - 15} more parameters")
+    print(f"{'='*80}\n")
+
+    # Create validation output directory
+    year_start = val_start.year
+    year_end = val_end.year
+    period_name = f"val_{year_start}_{year_end}"
+
+    # Initialize OutputManager with VALIDATE mode
+    set_output_manager(optimization_mode="VALIDATE")
+    output_mgr = get_output_manager()
+
+    # Calculate training/validation split (70/30 of the period)
+    total_days = (val_end - val_start).days
+    training_days = int(total_days * 0.7)
+    training_end_date = val_start + timedelta(days=training_days)
+    validation_start_date = training_end_date + timedelta(days=1)
+
+    print(f"Data Partitioning for {year_start}-{year_end}:")
+    print(f"  TRAINING:    {val_start} to {training_end_date} ({training_days} days, 70%)")
+    print(f"  VALIDATION:  {validation_start_date} to {val_end} ({total_days - training_days} days, 30%)")
+    print(f"  FULL PERIOD: {val_start} to {val_end} ({total_days} days)")
+    print()
+
+    # Run backtests on all three periods
+    print("Running backtests with loaded parameters...")
+
+    # Get parameter values with defaults
+    min_confluence = best_params.get('min_confluence_score', best_params.get('min_confluence', 3))
+    min_quality = best_params.get('min_quality_factors', 2)
+    risk_pct = best_params.get('risk_per_trade_pct', 0.5)
+    atr_min_pct = best_params.get('atr_min_percentile', 50.0)
+    trail_r = best_params.get('trail_activation_r', 1.0)
+    dec_atr = best_params.get('december_atr_multiplier', 1.5)
+    vol_boost = best_params.get('volatile_asset_boost', 1.3)
+    adx_trend = best_params.get('adx_trend_threshold', 18.0)
+    adx_range = best_params.get('adx_range_threshold', 12.0)
+    trend_conf = best_params.get('trend_min_confluence', 5)
+    range_conf = best_params.get('range_min_confluence', 3)
+    atr_vol_ratio = best_params.get('atr_volatility_ratio', best_params.get('atr_vol_ratio_range', 0.8))
+    atr_trail = best_params.get('atr_trail_multiplier', 1.8)
+    partial_1r = best_params.get('partial_exit_at_1r', True)
+    partial_pct = best_params.get('partial_exit_pct', 0.8)
+    tp1_r = best_params.get('tp1_r_multiple', 1.75)
+    tp2_r = best_params.get('tp2_r_multiple', 3.0)
+    tp3_r = best_params.get('tp3_r_multiple', 5.5)
+    tp1_close = best_params.get('tp1_close_pct', 0.35)
+    tp2_close = best_params.get('tp2_close_pct', 0.20)
+    tp3_close = best_params.get('tp3_close_pct', 0.25)
+    use_htf = best_params.get('use_htf_filter', False)
+    use_struct = best_params.get('use_structure_filter', False)
+    use_confirm = best_params.get('use_confirmation_filter', False)
+    use_fib = best_params.get('use_fib_filter', False)
+    use_disp = best_params.get('use_displacement_filter', False)
+    use_candle = best_params.get('use_candle_rejection', False)
+    daily_halt = best_params.get('daily_loss_halt_pct', 4.0)
+    total_dd_warn = best_params.get('max_total_dd_warning', 8.0)
+    consec_halt = best_params.get('consecutive_loss_halt', 999)
+
+    # Training period backtest
+    print(f"\n📈 TRAINING PERIOD: {val_start} to {training_end_date}")
+    training_trades = run_full_period_backtest(
+        start_date=val_start,
+        end_date=training_end_date,
+        min_confluence=min_confluence,
+        min_quality_factors=min_quality,
+        risk_per_trade_pct=risk_pct,
+        atr_min_percentile=atr_min_pct,
+        trail_activation_r=trail_r,
+        december_atr_multiplier=dec_atr,
+        volatile_asset_boost=vol_boost,
+        adx_trend_threshold=adx_trend,
+        adx_range_threshold=adx_range,
+        trend_min_confluence=trend_conf,
+        range_min_confluence=range_conf,
+        atr_volatility_ratio=atr_vol_ratio,
+        atr_trail_multiplier=atr_trail,
+        partial_exit_at_1r=partial_1r,
+        partial_exit_pct=partial_pct,
+        tp1_r_multiple=tp1_r,
+        tp2_r_multiple=tp2_r,
+        tp3_r_multiple=tp3_r,
+        tp1_close_pct=tp1_close,
+        tp2_close_pct=tp2_close,
+        tp3_close_pct=tp3_close,
+        use_htf_filter=use_htf,
+        use_structure_filter=use_struct,
+        use_confirmation_filter=use_confirm,
+        use_fib_filter=use_fib,
+        use_displacement_filter=use_disp,
+        use_candle_rejection=use_candle,
+        daily_loss_halt_pct=daily_halt,
+        max_total_dd_warning=total_dd_warn,
+        consecutive_loss_halt=consec_halt,
+    )
+
+    # Validation period backtest
+    print(f"\n📈 VALIDATION PERIOD: {validation_start_date} to {val_end}")
+    validation_trades = run_full_period_backtest(
+        start_date=validation_start_date,
+        end_date=val_end,
+        min_confluence=min_confluence,
+        min_quality_factors=min_quality,
+        risk_per_trade_pct=risk_pct,
+        atr_min_percentile=atr_min_pct,
+        trail_activation_r=trail_r,
+        december_atr_multiplier=dec_atr,
+        volatile_asset_boost=vol_boost,
+        adx_trend_threshold=adx_trend,
+        adx_range_threshold=adx_range,
+        trend_min_confluence=trend_conf,
+        range_min_confluence=range_conf,
+        atr_volatility_ratio=atr_vol_ratio,
+        atr_trail_multiplier=atr_trail,
+        partial_exit_at_1r=partial_1r,
+        partial_exit_pct=partial_pct,
+        tp1_r_multiple=tp1_r,
+        tp2_r_multiple=tp2_r,
+        tp3_r_multiple=tp3_r,
+        tp1_close_pct=tp1_close,
+        tp2_close_pct=tp2_close,
+        tp3_close_pct=tp3_close,
+        use_htf_filter=use_htf,
+        use_structure_filter=use_struct,
+        use_confirmation_filter=use_confirm,
+        use_fib_filter=use_fib,
+        use_displacement_filter=use_disp,
+        use_candle_rejection=use_candle,
+        daily_loss_halt_pct=daily_halt,
+        max_total_dd_warning=total_dd_warn,
+        consecutive_loss_halt=consec_halt,
+    )
+
+    # Full period backtest
+    print(f"\n📈 FULL PERIOD: {val_start} to {val_end}")
+    full_trades = run_full_period_backtest(
+        start_date=val_start,
+        end_date=val_end,
+        min_confluence=min_confluence,
+        min_quality_factors=min_quality,
+        risk_per_trade_pct=risk_pct,
+        atr_min_percentile=atr_min_pct,
+        trail_activation_r=trail_r,
+        december_atr_multiplier=dec_atr,
+        volatile_asset_boost=vol_boost,
+        adx_trend_threshold=adx_trend,
+        adx_range_threshold=adx_range,
+        trend_min_confluence=trend_conf,
+        range_min_confluence=range_conf,
+        atr_volatility_ratio=atr_vol_ratio,
+        atr_trail_multiplier=atr_trail,
+        partial_exit_at_1r=partial_1r,
+        partial_exit_pct=partial_pct,
+        tp1_r_multiple=tp1_r,
+        tp2_r_multiple=tp2_r,
+        tp3_r_multiple=tp3_r,
+        tp1_close_pct=tp1_close,
+        tp2_close_pct=tp2_close,
+        tp3_close_pct=tp3_close,
+        use_htf_filter=use_htf,
+        use_structure_filter=use_struct,
+        use_confirmation_filter=use_confirm,
+        use_fib_filter=use_fib,
+        use_displacement_filter=use_disp,
+        use_candle_rejection=use_candle,
+        daily_loss_halt_pct=daily_halt,
+        max_total_dd_warning=total_dd_warn,
+        consecutive_loss_halt=consec_halt,
+    )
+
+    # Print results
+    print(f"\n{'='*80}")
+    print(f"VALIDATION RESULTS: {year_start}-{year_end}")
+    print(f"{'='*80}")
+
+    for period_name_str, trades, start, end in [
+        ("TRAINING", training_trades, val_start, training_end_date),
+        ("VALIDATION", validation_trades, validation_start_date, val_end),
+        ("FULL PERIOD", full_trades, val_start, val_end),
+    ]:
+        if trades:
+            total_r = sum(getattr(t, 'rr', 0) for t in trades)
+            wins = sum(1 for t in trades if getattr(t, 'rr', 0) > 0)
+            win_rate = (wins / len(trades) * 100) if trades else 0
+            profit_usd = total_r * (risk_pct / 100) * 200000
+            print(f"\n{period_name_str} ({start} to {end}):")
+            print(f"   Trades: {len(trades)}")
+            print(f"   Total R: {total_r:+.2f}")
+            print(f"   Win Rate: {win_rate:.1f}%")
+            print(f"   Est. Profit: ${profit_usd:+,.2f}")
+        else:
+            print(f"\n{period_name_str}: No trades")
+
+    # Save results
+    print(f"\n📊 Exporting results to {output_mgr.output_dir}...")
+    output_mgr.save_best_trial_trades(
+        training_trades=training_trades,
+        validation_trades=validation_trades,
+        final_trades=full_trades,
+        risk_pct=risk_pct,
+    )
+    output_mgr.generate_monthly_stats(full_trades, "final", risk_pct)
+    output_mgr.generate_symbol_performance(full_trades, risk_pct)
+    output_mgr.save_best_params(best_params)
+
+    # Generate summary
+    generate_analysis_summary(
+        training_trades=training_trades,
+        validation_trades=validation_trades,
+        full_year_trades=full_trades,
+        best_params=best_params
+    )
+
+    # Generate professional report
+    try:
+        training_risk = calculate_risk_metrics(training_trades, risk_pct)
+        validation_risk = calculate_risk_metrics(validation_trades, risk_pct)
+        full_risk = calculate_risk_metrics(full_trades, risk_pct)
+
+        generate_professional_report(
+            best_params=best_params,
+            training_metrics=training_risk,
+            validation_metrics=validation_risk,
+            full_metrics=full_risk,
+            walk_forward_results={'total_windows': 0, 'avg_sharpe_degradation': 0, 'std_sharpe_degradation': 0},
+            output_file=output_mgr.output_dir / "professional_backtest_report.txt"
+        )
+        print(f"✓ Professional report saved")
+    except Exception as e:
+        print(f"[!] Report generation failed: {e}")
+
+    # Archive to history with period-specific naming
+    output_mgr.archive_validation_run(year_start, year_end)
+
+    print(f"\n{'='*80}")
+    print(f"✅ VALIDATION COMPLETE")
+    print(f"   Results saved to: {output_mgr.output_dir}/history/")
+    print(f"{'='*80}\n")
+
+
 def main():
     """
     Professional FTMO Optimization Workflow with CLI support.
-    
+
     Uses ROLLING OPTIMIZATION window (last 18 months) for adaptive parameter fitting.
     Training: 1 year of historical data ending 3 months ago
     Validation: Most recent 3 months (out-of-sample)
-    
+
     Usage:
+      # Optimization mode (normal)
       python ftmo_challenge_analyzer.py              # Run/resume optimization (5 trials)
       python ftmo_challenge_analyzer.py --status     # Check progress without running
       python ftmo_challenge_analyzer.py --trials 100 # Run 100 trials
       python ftmo_challenge_analyzer.py --multi      # Use NSGA-II multi-objective optimization
+
+      # Validation mode (test existing params on different periods)
+      python ftmo_challenge_analyzer.py --validate --start 2020-01-01 --end 2022-12-31
+      python ftmo_challenge_analyzer.py --validate --start 2018-01-01 --end 2019-12-31 --params-file best_params.json
     """
     parser = argparse.ArgumentParser(
         description="FTMO Professional Optimization System - Resumable with ADX Filter"
@@ -2568,12 +2860,49 @@ def main():
         action="store_true",
         help="Use TPE single-objective optimization (default mode)"
     )
+    # === VALIDATION MODE (New) ===
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run validation mode: test existing params on different date range (1 trial, no optimization)"
+    )
+    parser.add_argument(
+        "--start",
+        type=str,
+        default=None,
+        help="Validation start date (YYYY-MM-DD), e.g., --start 2020-01-01"
+    )
+    parser.add_argument(
+        "--end",
+        type=str,
+        default=None,
+        help="Validation end date (YYYY-MM-DD), e.g., --end 2022-12-31"
+    )
+    parser.add_argument(
+        "--params-file",
+        type=str,
+        default="best_params.json",
+        help="Path to params JSON file for validation mode (default: best_params.json)"
+    )
     args = parser.parse_args()
     
     if args.status:
         show_optimization_status()
         return
-    
+
+    # === VALIDATION MODE ===
+    if args.validate:
+        if not args.start or not args.end:
+            print("❌ Error: --validate requires --start and --end dates")
+            print("   Example: python ftmo_challenge_analyzer.py --validate --start 2020-01-01 --end 2022-12-31")
+            return
+        run_validation_mode(
+            start_date_str=args.start,
+            end_date_str=args.end,
+            params_file=args.params_file
+        )
+        return
+
     n_trials = args.trials
     use_multi_objective = args.multi
     

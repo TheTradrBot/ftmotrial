@@ -233,7 +233,60 @@ class OutputManager:
         
         print(f"📦 Archived run to: {run_dir.relative_to(self.output_dir.parent)}")
         return run_dir
-    
+
+    def archive_validation_run(self, year_start: int, year_end: int):
+        """
+        Archive validation run results to history/val_YYYY_YYYY_XXX/ directory.
+
+        Args:
+            year_start: Start year of validation period
+            year_end: End year of validation period
+
+        Creates folders like: val_2020_2022_001, val_2020_2022_002, etc.
+        """
+        import shutil
+
+        history_dir = self.output_dir / "history"
+        history_dir.mkdir(exist_ok=True)
+
+        # Files to archive (same as regular runs)
+        files_to_archive = [
+            self.log_file,
+            self.best_training_file,
+            self.best_validation_file,
+            self.best_final_file,
+            self.monthly_stats_file,
+            self.symbol_perf_file,
+            self.output_dir / "best_params.json",
+            self.output_dir / "professional_backtest_report.txt",
+        ]
+
+        # Also find any analysis_summary_*.txt files
+        analysis_summaries = list(self.output_dir.glob("analysis_summary_*.txt"))
+        files_to_archive.extend(analysis_summaries)
+
+        existing_files = [f for f in files_to_archive if f.exists()]
+
+        if not existing_files:
+            print("⚠️  No files to archive")
+            return None
+
+        # Get next run number for this period
+        period_prefix = f"val_{year_start}_{year_end}"
+        existing_runs = list(history_dir.glob(f"{period_prefix}_*"))
+        run_number = len(existing_runs) + 1
+
+        run_dir = history_dir / f"{period_prefix}_{run_number:03d}"
+        run_dir.mkdir(exist_ok=True)
+
+        # COPY files to run directory
+        for file_path in existing_files:
+            target_path = run_dir / file_path.name
+            shutil.copy2(file_path, target_path)
+
+        print(f"📦 Archived validation run to: {run_dir.relative_to(self.output_dir.parent)}")
+        return run_dir
+
     def log_trial(
         self,
         trial_number: int,
