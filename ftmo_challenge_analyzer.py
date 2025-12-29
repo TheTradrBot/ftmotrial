@@ -1666,17 +1666,23 @@ class OptunaOptimizer:
         # ============================================================================
         max_ftmo_dd = compliance_report.get('max_ftmo_dd_pct', 0)
 
+        # Tiered FTMO DD scoring (V5):
+        # - FAIL zone (>=10%): Instant disqualification
+        # - Danger zone (8-10%): Heavy penalty, too close to limit
+        # - Warning zone (5-8%): Moderate penalty, risky
+        # - Safe zone (3-5%): No penalty, acceptable DD
+        # - Excellent zone (<3%): Bonus for very low DD
         ftmo_dd_penalty = 0.0
         if max_ftmo_dd >= 10.0:
-            ftmo_dd_penalty = 500.0
+            ftmo_dd_penalty = 999999.0  # FAIL - instant disqualification
         elif max_ftmo_dd >= 8.0:
-            ftmo_dd_penalty = 100.0 + (max_ftmo_dd - 8.0) * 50
+            ftmo_dd_penalty = 100.0 + (max_ftmo_dd - 8.0) * 50  # 100 to 200 penalty
         elif max_ftmo_dd >= 5.0:
-            ftmo_dd_penalty = 20.0 + (max_ftmo_dd - 5.0) * 20
+            ftmo_dd_penalty = 20.0 + (max_ftmo_dd - 5.0) * 20  # 20 to 80 penalty
         elif max_ftmo_dd >= 3.0:
-            ftmo_dd_penalty = (max_ftmo_dd - 3.0) * 5
+            ftmo_dd_penalty = 0.0  # Safe zone: no penalty, profit matters more here
         else:
-            ftmo_dd_penalty = -10.0
+            ftmo_dd_penalty = -10.0 - (3.0 - max_ftmo_dd) * 5  # Bonus: -10 to -25 (max +25 at 0%)
 
         # ============================================================================
         # COMPONENT: FTMO CHALLENGE PASS BONUS
