@@ -42,7 +42,7 @@ _archive/
 # Analysis output (runtime generated)
 # Keep tracked for reproducibility, but can exclude if too large:
 # ftmo_analysis_output/
-ftmo_analysis_output/VALIDATE/
+# Note: VALIDATE folder IS tracked for validation results history
 
 # S/R cache (runtime computed)
 data/sr_cache/

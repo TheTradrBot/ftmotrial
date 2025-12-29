@@ -1,0 +1,78 @@
+====================================================================================================
+PROFESSIONAL QUANTITATIVE TRADING ANALYSIS REPORT
+====================================================================================================
+Generated: 2025-12-29 18:33:15
+
+EXECUTIVE SUMMARY
+----------------------------------------------------------------------------------------------------
+Strategy Status: NEEDS IMPROVEMENT
+Training Sharpe Ratio: +0.00
+Validation Sharpe Ratio: +0.00
+Degradation: 0.00
+
+PERFORMANCE METRICS COMPARISON
+----------------------------------------------------------------------------------------------------
+Metric                                     Training           Validation          Full Period
+----------------------------------------------------------------------------------------------------
+Total Return                                  0.00%                0.00%                0.00%
+Annual Return                                 0.00%                0.00%                0.00%
+Sharpe Ratio                                   0.00                 0.00                 0.00
+Sortino Ratio                                  0.00                 0.00                 0.00
+Calmar Ratio                                   0.00                 0.00                 0.00
+Max Drawdown                                  0.00$                0.00$                0.00$
+Win Rate                                       0.0%                 0.0%                 0.0%
+Profit Factor                                  0.00                 0.00                 0.00
+Recovery Factor                                0.00                 0.00                 0.00
+
+ROBUSTNESS ANALYSIS (Walk-Forward Testing)
+----------------------------------------------------------------------------------------------------
+Total Windows Tested: 0
+Average Sharpe Degradation: +0.00
+Std Dev Degradation: 0.00
+Average Return Degradation: +0.00%
+
+OPTIMAL PARAMETERS
+----------------------------------------------------------------------------------------------------
+  adx_range_threshold                         12.0000
+  adx_trend_threshold                         18.0000
+  atr_min_percentile                          50.0000
+  atr_trail_multiplier                         1.8000
+  atr_vol_ratio_range                          0.8000
+  atr_volatility_ratio                         0.8000
+  consecutive_loss_halt                             9
+  daily_loss_halt_pct                          3.8000
+  december_atr_multiplier                      1.5000
+  max_total_dd_warning                         7.5000
+  min_confluence                                    3
+  min_confluence_score                              3
+  min_quality_factors                               2
+  partial_exit_at_1r                             True
+  partial_exit_pct                             0.8000
+  range_min_confluence                              3
+  risk_per_trade_pct                           0.6000
+  tp1_close_pct                                0.3500
+  tp1_r_multiple                               1.7500
+  tp2_close_pct                                0.2000
+  tp2_r_multiple                               3.0000
+  tp3_close_pct                                0.2500
+  tp3_r_multiple                               5.5000
+  trail_activation_r                           1.0000
+  trend_min_confluence                              5
+  use_adx_slope_rising                          False
+  use_candle_rejection                          False
+  use_confirmation_filter                       False
+  use_displacement_filter                       False
+  use_fib_filter                                False
+  use_htf_filter                                False
+  use_structure_filter                          False
+  volatile_asset_boost                         1.3000
+
+APPROVAL CRITERIA
+----------------------------------------------------------------------------------------------------
+✓ Sharpe Ratio > 0.5: False
+✓ Win Rate > 45%: False
+✓ Profit Factor > 1.5: False
+✓ IS-OOS Degradation < 0.5: True
+✓ Consistency Score: 0.00%
+
+====================================================================================================
