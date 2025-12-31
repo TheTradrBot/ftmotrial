@@ -818,10 +818,15 @@ class LiveTradingBot:
         SESSION FILTER: Only place orders during London/NY hours (08:00-22:00 UTC)
         This ensures execution during high liquidity, avoiding Asian session whipsaws.
         
-        EXCEPTION: Fresh signals (< 2 hours old) can execute immediately after daily close
+        EXCEPTION: Fresh signals (< 2 hours old) with good spread can execute after daily close.
         This captures moves that start right at NY close without waiting for London.
         """
-        # Session filter with fresh signal exception
+        from ftmo_config import FTMO_CONFIG, get_pip_size, get_sl_limits
+        
+        symbol = setup["symbol"]
+        broker_symbol = setup.get("broker_symbol", self.symbol_map.get(symbol, symbol))
+        
+        # Session filter with fresh signal + spread exception
         now = datetime.now(timezone.utc)
         is_fresh_signal = False
         
@@ -837,18 +842,32 @@ class LiveTradingBot:
                 age_hours = (now - created_at).total_seconds() / 3600
                 is_fresh_signal = age_hours < 2.0
         
-        # Normal session filter, but allow fresh signals through
+        # Normal session filter, but allow fresh signals with good spread through
         if not self._is_tradable_session():
             if is_fresh_signal:
-                log.info(f"[{setup['symbol']}] Fresh signal exception: executing despite Asian session (signal age < 2h)")
+                # Fresh signal - check if spread is acceptable for immediate entry
+                tick = self.mt5.get_tick(broker_symbol)
+                if tick is not None:
+                    pip_size = get_pip_size(symbol)
+                    if pip_size <= 0:
+                        pip_size = 0.0001
+                    current_spread_pips = tick.spread / pip_size
+                    
+                    # Use tighter spread requirement for off-hours execution
+                    max_spread_off_hours = FIVEERS_CONFIG.get_max_spread_pips(symbol) * 0.75  # 25% tighter
+                    
+                    if current_spread_pips <= max_spread_off_hours:
+                        log.info(f"[{symbol}] Fresh signal + good spread ({current_spread_pips:.1f} pips): executing despite off-hours")
+                    else:
+                        log.info(f"[{symbol}] Fresh signal but spread too wide ({current_spread_pips:.1f} > {max_spread_off_hours:.1f} pips): waiting for London")
+                        return False
+                else:
+                    log.info(f"[{symbol}] Fresh signal but cannot check spread: waiting for London")
+                    return False
             else:
                 log.info(f"[{setup['symbol']}] Outside trading hours (08:00-22:00 UTC), waiting for London/NY session")
                 return False  # Keep setup pending, try again later
         
-        from ftmo_config import FTMO_CONFIG, get_pip_size, get_sl_limits
-        
-        symbol = setup["symbol"]
-        broker_symbol = setup.get("broker_symbol", self.symbol_map.get(symbol, symbol))
         direction = setup["direction"]
         current_price = setup.get("current_price", 0)
         entry = setup["entry"]
@@ -1766,7 +1785,8 @@ class LiveTradingBot:
         log.info(f"    * Tier 2: 3.5% daily -> Cancel pending orders")
         log.info(f"    * Tier 3: 4.5% daily -> Emergency close")
         log.info(f"  - Session Filter: Orders only during London/NY (08:00-22:00 UTC)")
-        log.info(f"  - Scanning: 24/7 (captures all signals)")
+        log.info(f"  - Scanning: Only at 22:05 UTC (after daily close)")
+        log.info(f"  - Fresh Signal Exception: Execute if spread is tight after daily close")
         log.info(f"  - Partial TPs: 45% TP1, 30% TP2, 25% TP3 (Challenge Mode)")
         log.info(f"Server: {MT5_SERVER}")
         log.info(f"Login: {MT5_LOGIN}")
@@ -1820,9 +1840,28 @@ class LiveTradingBot:
                     if now >= next_validate:
                         self.validate_all_setups()
                 
-                if self.last_scan_time:
-                    next_scan = self.last_scan_time + timedelta(hours=SCAN_INTERVAL_HOURS)
-                    if now >= next_scan:
+                # DAILY CLOSE SCAN: Only scan at 22:05-22:30 UTC (after NY close)
+                # This ensures we analyze complete daily candles (like backtest)
+                hour_utc = now.hour
+                minute_utc = now.minute
+                is_scan_window = (hour_utc == 22 and 5 <= minute_utc <= 30)
+                
+                if is_scan_window:
+                    # Check if we already scanned today
+                    if self.last_scan_time:
+                        hours_since_scan = (now - self.last_scan_time).total_seconds() / 3600
+                        if hours_since_scan < 20:  # Already scanned in last 20 hours
+                            pass  # Skip, already scanned today
+                        else:
+                            log.info("=" * 70)
+                            log.info("DAILY CLOSE SCAN (22:05 UTC) - Analyzing complete candles")
+                            log.info("=" * 70)
+                            self.scan_all_symbols()
+                    else:
+                        # First scan
+                        log.info("=" * 70)
+                        log.info("DAILY CLOSE SCAN (22:05 UTC) - Analyzing complete candles")
+                        log.info("=" * 70)
                         self.scan_all_symbols()
                 
                 if not self.mt5.connected:
