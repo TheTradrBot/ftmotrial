@@ -638,25 +638,30 @@ class LiveTradingBot:
         
         has_confirmation = flags.get("confirmation", False)
         has_rr = flags.get("rr", False)
-        has_location = flags.get("location", False)
-        has_fib = flags.get("fib", False)
-        has_liquidity = flags.get("liquidity", False)
-        has_structure = flags.get("structure", False)
-        has_htf_bias = flags.get("htf_bias", False)
         
-        # EXACT same quality factor calculation as backtest_live_bot.py
-        quality_factors = sum([has_location, has_fib, has_liquidity, has_structure, has_htf_bias])
+        # SYNC WITH TPE OPTIMIZER (strategy_core.py generate_signals)
+        # Quality is based on confluence score itself, not individual pillars
+        quality_factors = max(1, confluence_score // 3)  # At least 1 quality factor for any decent confluence
         
-        # BUGFIX: Removed has_rr gate - it was preventing all trades from being active
-        # If confluence and quality are sufficient, R:R is implicitly validated
-        if confluence_score >= MIN_CONFLUENCE and quality_factors >= FIVEERS_CONFIG.min_quality_factors:
+        # Apply volatile asset boost for high-volatility instruments
+        from strategy_core import apply_volatile_asset_boost
+        boosted_confluence, boosted_quality = apply_volatile_asset_boost(
+            symbol,
+            confluence_score,
+            quality_factors,
+            self.params.volatile_asset_boost
+        )
+        
+        # Use boosted scores for threshold comparison (same as TPE optimizer)
+        min_quality_for_active = max(1, self.params.min_quality_factors - 1)
+        if boosted_confluence >= MIN_CONFLUENCE and boosted_quality >= min_quality_for_active:
             status = "active"
-        elif confluence_score >= MIN_CONFLUENCE:
+        elif boosted_confluence >= MIN_CONFLUENCE - 1:
             status = "watching"
         else:
             status = "scan_only"
         
-        log.info(f"[{symbol}] {direction.upper()} | Conf: {confluence_score}/7 | Quality: {quality_factors} | Status: {status}")
+        log.info(f"[{symbol}] {direction.upper()} | Conf: {confluence_score}/7 (boosted: {boosted_confluence}) | Quality: {quality_factors} | Status: {status}")
         
         for pillar, is_met in flags.items():
             marker = "✓" if is_met else "✗"
@@ -1363,17 +1368,23 @@ class LiveTradingBot:
         )
         
         confluence_score = sum(1 for v in flags.values() if v)
-        has_rr = flags.get("rr", False)
-        quality_factors = sum([
-            flags.get("location", False),
-            flags.get("fib", False),
-            flags.get("liquidity", False),
-            flags.get("structure", False),
-            flags.get("htf_bias", False)
-        ])
         
-        # BUGFIX: Removed has_rr gate for consistency with new active signal criteria
-        if not (confluence_score >= MIN_CONFLUENCE and quality_factors >= 1):
+        # SYNC WITH TPE OPTIMIZER (strategy_core.py generate_signals)
+        # Quality is based on confluence score itself, not individual pillars
+        quality_factors = max(1, confluence_score // 3)
+        
+        # Apply volatile asset boost
+        from strategy_core import apply_volatile_asset_boost
+        boosted_confluence, boosted_quality = apply_volatile_asset_boost(
+            symbol,
+            confluence_score,
+            quality_factors,
+            self.params.volatile_asset_boost
+        )
+        
+        # Use boosted scores for threshold comparison (same as TPE optimizer)
+        min_quality_for_active = max(1, self.params.min_quality_factors - 1)
+        if not (boosted_confluence >= MIN_CONFLUENCE and boosted_quality >= min_quality_for_active):
             log.warning(f"[{symbol}] Setup no longer valid (conf: {confluence_score}/7, quality: {quality_factors}) - cancelling")
             if setup.order_ticket:
                 self.mt5.cancel_pending_order(setup.order_ticket)
