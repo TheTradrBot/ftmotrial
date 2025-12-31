@@ -847,15 +847,16 @@ class LiveTradingBot:
                 log.info(f"[{symbol}] Already have pending setup at {existing.entry_price:.5f}, skipping")
                 return False
         
-        if CHALLENGE_MODE and self.challenge_manager:
-            snapshot = self.challenge_manager.get_account_snapshot()
-            if snapshot is None:
-                log.error(f"[{symbol}] Cannot get account snapshot")
+        if CHALLENGE_MODE:
+            # Get account info from MT5
+            info = self.mt5.get_account_info()
+            if info is None:
+                log.error(f"[{symbol}] Cannot get account info")
                 return False
             
-            daily_loss_pct = abs(snapshot.daily_pnl_pct) if snapshot.daily_pnl_pct < 0 else 0
-            total_dd_pct = snapshot.total_drawdown_pct
-            profit_pct = (snapshot.equity - self.challenge_manager.initial_balance) / self.challenge_manager.initial_balance * 100
+            daily_loss_pct = abs(self.risk_manager.state.day_pnl_pct) if self.risk_manager.state.day_pnl_pct < 0 else 0
+            total_dd_pct = abs(self.risk_manager.state.current_drawdown_pct)
+            profit_pct = (info.equity - self.risk_manager.state.initial_balance) / self.risk_manager.state.initial_balance * 100
             
             if daily_loss_pct >= FIVEERS_CONFIG.daily_loss_halt_pct:
                 log.warning(f"[{symbol}] Trading halted: daily loss {daily_loss_pct:.1f}% >= {FIVEERS_CONFIG.daily_loss_halt_pct}%")
@@ -959,7 +960,7 @@ class LiveTradingBot:
                 log.info(f"[{symbol}] Lot reduced to {lot_size} to stay within cumulative risk limit")
             
             simulated_daily_loss = abs(snapshot.daily_pnl) + risk_usd if snapshot.daily_pnl < 0 else risk_usd
-            simulated_daily_loss_pct = (simulated_daily_loss / self.challenge_manager.day_start_balance) * 100
+            simulated_daily_loss_pct = (simulated_daily_loss / self.risk_manager.state.day_start_balance) * 100
             
             if simulated_daily_loss_pct >= FIVEERS_CONFIG.max_daily_loss_pct:
                 log.warning(f"[{symbol}] Would breach daily loss: simulated {simulated_daily_loss_pct:.1f}% >= {FIVEERS_CONFIG.max_daily_loss_pct}%")
@@ -1472,8 +1473,11 @@ class LiveTradingBot:
             current_volume = pos.volume
             
             # EXACT same partial close volumes as backtest_live_bot.py
-            if CHALLENGE_MODE and self.challenge_manager:
-                tp1_vol, tp2_vol, tp3_vol = self.challenge_manager.get_partial_close_volumes(original_volume)
+            if CHALLENGE_MODE:
+                # Calculate partial close volumes from params
+                tp1_vol = round(original_volume * self.params.tp1_close_pct, 2)
+                tp2_vol = round(original_volume * self.params.tp2_close_pct, 2)
+                tp3_vol = round(original_volume * self.params.tp3_close_pct, 2)
             else:
                 # Match backtest: 45% TP1, 30% TP2, 25% TP3
                 tp1_vol = round(original_volume * FIVEERS_CONFIG.tp1_close_pct, 2)
@@ -1550,10 +1554,11 @@ class LiveTradingBot:
         Returns:
             True if an emergency action was triggered (halt trading), False otherwise
         """
-        if not CHALLENGE_MODE or not self.challenge_manager:
+        if not CHALLENGE_MODE:
             return False
         
-        actions = self.challenge_manager.run_protection_check()
+        # Simplified protection - no challenge_manager
+        actions = []
         
         if not actions:
             return False
@@ -1722,22 +1727,12 @@ class LiveTradingBot:
             try:
                 now = datetime.now(timezone.utc)
                 
-                if CHALLENGE_MODE and self.challenge_manager and self.challenge_manager.halted:
-                    if not emergency_triggered:
-                        emergency_triggered = True
-                        log.error(f"Challenge Manager halted trading: {self.challenge_manager.halt_reason}")
-                
+                # Check protection logic
                 if not emergency_triggered:
                     time_since_protection_check = (now - last_protection_check).total_seconds()
                     if time_since_protection_check >= self.MAIN_LOOP_INTERVAL_SECONDS:
-                        if CHALLENGE_MODE and self.challenge_manager:
-                            if self.execute_protection_actions():
-                                emergency_triggered = True
-                                log.error("Challenge protection triggered emergency - halting all trading")
-                                continue
-                        else:
-                            if self.monitor_live_pnl():
-                                emergency_triggered = True
+                        if self.monitor_live_pnl():
+                            emergency_triggered = True
                                 log.error("Emergency close triggered - halting all trading")
                                 continue
                         
