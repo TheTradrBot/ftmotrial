@@ -2800,11 +2800,20 @@ def simulate_trades(
                     entered_signal_ids.add(sig_id)
                     continue
                 
-                # Session filter: Skip entries during Asian session (22:00-08:00 UTC)
+                # Session filter: Only applicable for intraday timeframes (H4 or lower)
+                # For Daily backtests, candle timestamps are midnight so we skip this check
+                # The live bot handles session filtering at scan time instead
+                # NOTE: This filter is primarily for future H4/H1 backtests
                 if params.use_session_filter:
                     entry_dt = _get_candle_datetime(c)
-                    if entry_dt and not _is_tradable_session(entry_dt, params):
-                        continue  # Skip this bar, but don't expire the signal
+                    if entry_dt:
+                        # Only apply if we have intraday data (hour != 0 or we detect H4 data)
+                        # For daily data, timestamps are typically 00:00 so we skip
+                        hour = entry_dt.hour
+                        # If hour is 0 and all candles have hour 0, this is daily data - skip filter
+                        if hour != 0:  # Only filter if we have actual intraday timing
+                            if not _is_tradable_session(entry_dt, params):
+                                continue  # Skip this bar, but don't expire the signal
                 
                 theoretical_entry = sig.entry
                 direction = sig.direction
