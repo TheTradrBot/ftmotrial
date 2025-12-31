@@ -102,9 +102,12 @@ OANDA_TO_FIVEERS: Dict[str, str] = {
     "BTC_USD": "BTCUSD",
     "ETH_USD": "ETHUSD",
     
-    # ============ INDICES (2) ============
-    "SPX500_USD": "US500.cash",
-    "NAS100_USD": "US100.cash",
+    # ============ INDICES (3) ============
+    # NOTE: Using Forex.com format for now (SPX500, NAS100, UK100)
+    # 5ers uses: US500.cash, US100.cash
+    "SPX500_USD": "SPX500",
+    "NAS100_USD": "NAS100", 
+    "UK100_USD": "UK100",
 }
 
 
