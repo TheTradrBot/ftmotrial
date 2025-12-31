@@ -221,6 +221,10 @@ class LiveTradingBot:
         self.challenge_start_date: Optional[datetime] = None
         self.challenge_end_date: Optional[datetime] = None
         
+        # Graduated risk management
+        self.risk_reduction_factor: float = 1.0  # 1.0 = normal, 0.67 = reduced (0.6% -> 0.4%)
+        self.last_risk_warning_time: Optional[datetime] = None
+        
         self._load_pending_setups()
         self._load_trading_days()
         self._auto_start_challenge()
@@ -529,6 +533,11 @@ class LiveTradingBot:
         
         Returns trade setup dict if signal is active AND tradeable, None otherwise.
         """
+        # Session filter: Only scan during London/NY hours (skip Asian session)
+        if not self._is_tradable_session():
+            log.debug(f"[{symbol}] Outside trading hours (London/NY only), skipping")
+            return None
+        
         from ftmo_config import FIVEERS_CONFIG, get_pip_size, get_sl_limits
         
         if symbol not in self.symbol_map:
@@ -978,7 +987,12 @@ class LiveTradingBot:
                 log.warning(f"[{symbol}] Trade blocked by risk manager: {risk_check.reason}")
                 return False
             
-            lot_size = risk_check.adjusted_lot
+            # Apply risk reduction factor if in drawdown
+            lot_size = risk_check.adjusted_lot * self.risk_reduction_factor
+            lot_size = max(0.01, round(lot_size, 2))  # Ensure minimum lot and round
+            
+            if self.risk_reduction_factor < 1.0:
+                log.info(f"[{symbol}] Risk reduction active: {risk_check.adjusted_lot:.2f} -> {lot_size:.2f} lots")
         
         if entry_distance_r <= FIVEERS_CONFIG.immediate_entry_r:
             order_type = "MARKET"
@@ -1327,18 +1341,38 @@ class LiveTradingBot:
         if current_equity < initial:
             total_dd_pct = ((initial - current_equity) / initial) * 100
         
-        # Cancel pending orders if approaching limits (above 3.5% daily or 7% total)
+        # GRADUATED RISK MANAGEMENT (3-tier system)
+        now = datetime.now(timezone.utc)
+        
+        # TIER 1: WARNING at 2.0% daily loss - Reduce position size
+        if daily_loss_pct >= 2.0 and self.risk_reduction_factor == 1.0:
+            self.risk_reduction_factor = 0.67  # 0.6% -> 0.4% risk
+            log.warning("=" * 70)
+            log.warning(f"⚠️  TIER 1 WARNING: Daily Loss {daily_loss_pct:.2f}%")
+            log.warning(f"   Reducing position size: 0.6% -> 0.4% risk per trade")
+            log.warning("=" * 70)
+        
+        # TIER 2: WARNING at 3.5% daily - Cancel pending orders
         if daily_loss_pct >= 3.5 or total_dd_pct >= 7.0:
+            # Warn every 5 minutes
+            if self.last_risk_warning_time is None or (now - self.last_risk_warning_time).total_seconds() > 300:
+                log.warning("=" * 70)
+                log.warning(f"⚠️  TIER 2 WARNING: Approaching Limits!")
+                log.warning(f"   Daily Loss: {daily_loss_pct:.2f}% (limit: 5%)")
+                log.warning(f"   Total DD: {total_dd_pct:.2f}% (limit: 10%)")
+                log.warning("=" * 70)
+                self.last_risk_warning_time = now
+            
             pending_orders = self.mt5.get_my_pending_orders()
             if pending_orders:
-                log.warning(f"Approaching limits (Daily: {daily_loss_pct:.1f}%, DD: {total_dd_pct:.1f}%) - cancelling {len(pending_orders)} pending orders")
+                log.warning(f"Cancelling {len(pending_orders)} pending orders to reduce risk")
                 for order in pending_orders:
                     self.mt5.cancel_pending_order(order.ticket)
                 self.pending_setups.clear()
                 self._save_pending_setups()
         
-        # Start closing positions if above 4.0% daily or 8.0% total
-        if daily_loss_pct >= 4.0 or total_dd_pct >= 8.0:
+        # TIER 3: EMERGENCY at 4.5% daily or 8.0% total - Start closing positions
+        if daily_loss_pct >= 4.5 or total_dd_pct >= 8.0:
             positions = self.mt5.get_my_positions()
             if not positions:
                 return False
@@ -1378,9 +1412,10 @@ class LiveTradingBot:
                         
                         log.info(f"  After close: Daily Loss: {new_daily_loss:.2f}%, Total DD: {new_total_dd:.2f}%")
                         
-                        # Stop if we're back under 3.5% daily and 7% total
-                        if new_daily_loss < 3.5 and new_total_dd < 7.0:
+                        # Stop if we're back under 3.0% daily and 7% total
+                        if new_daily_loss < 3.0 and new_total_dd < 7.0:
                             log.info("  Back under safe thresholds - stopping protective close")
+                            self.risk_reduction_factor = 1.0  # Reset to normal risk
                             return False
                         
                         # Emergency if we've breached hard limits
@@ -1697,7 +1732,11 @@ class LiveTradingBot:
         log.info(f"FTMO Risk Limits:")
         log.info(f"  - Max single trade risk: 0.75% (Challenge Mode)")
         log.info(f"  - Max cumulative risk: {FIVEERS_CONFIG.max_cumulative_risk_pct}%")
-        log.info(f"  - Emergency close at: 4.5% daily loss / 8% drawdown")
+        log.info(f"  - GRADUATED PROTECTION:")
+        log.info(f"    * Tier 1: 2.0% daily -> Reduce risk to 0.4%")
+        log.info(f"    * Tier 2: 3.5% daily -> Cancel pending orders")
+        log.info(f"    * Tier 3: 4.5% daily -> Emergency close")
+        log.info(f"  - Session Filter: London/NY only (08:00-22:00 UTC)")
         log.info(f"  - Partial TPs: 45% TP1, 30% TP2, 25% TP3 (Challenge Mode)")
         log.info(f"Server: {MT5_SERVER}")
         log.info(f"Login: {MT5_LOGIN}")
