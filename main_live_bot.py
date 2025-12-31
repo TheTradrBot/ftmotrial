@@ -1733,8 +1733,8 @@ class LiveTradingBot:
                     if time_since_protection_check >= self.MAIN_LOOP_INTERVAL_SECONDS:
                         if self.monitor_live_pnl():
                             emergency_triggered = True
-                                log.error("Emergency close triggered - halting all trading")
-                                continue
+                            log.error("Emergency close triggered - halting all trading")
+                            continue
                         
                         self.manage_partial_takes()
                         last_protection_check = now
