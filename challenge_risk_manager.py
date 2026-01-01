@@ -115,6 +115,7 @@ class ChallengeRiskManager:
         self.current_date: date = date.today()
         self.trades_today: int = 0
         self.risk_mode: RiskMode = RiskMode.NORMAL
+        self.halted: bool = False  # Trading halted flag
         
         # Load persisted state
         self._load_state()
