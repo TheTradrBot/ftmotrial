@@ -191,6 +191,7 @@ class OutputManager:
         Archive current run results to history/run_XXX/ directory.
         Call this at the END of optimization to save a copy of results.
         Files are COPIED (not moved) so TPE/ always has latest results.
+        Old analysis_summary files are cleaned up after archiving.
         """
         import shutil
         
@@ -208,9 +209,11 @@ class OutputManager:
             self.output_dir / "professional_backtest_report.txt",
         ]
 
-        # Also find any analysis_summary_*.txt files (timestamped)
-        analysis_summaries = list(self.output_dir.glob("analysis_summary_*.txt"))
-        files_to_archive.extend(analysis_summaries)
+        # Only archive the NEWEST analysis_summary (not all of them!)
+        analysis_summaries = sorted(self.output_dir.glob("analysis_summary_*.txt"), reverse=True)
+        if analysis_summaries:
+            # Only take the most recent one
+            files_to_archive.append(analysis_summaries[0])
 
         existing_files = [f for f in files_to_archive if f.exists()]
         
@@ -231,6 +234,14 @@ class OutputManager:
             target_path = run_dir / file_path.name
             shutil.copy2(file_path, target_path)
         
+        # CLEANUP: Remove ALL analysis_summary files from main folder after archiving
+        # This prevents old summaries from accumulating and being copied to future runs
+        for summary_file in analysis_summaries:
+            try:
+                summary_file.unlink()
+            except Exception:
+                pass  # Ignore errors during cleanup
+        
         print(f"📦 Archived run to: {run_dir.relative_to(self.output_dir.parent)}")
         return run_dir
 
@@ -243,6 +254,7 @@ class OutputManager:
             year_end: End year of validation period
 
         Creates folders like: val_2020_2022_001, val_2020_2022_002, etc.
+        Old analysis_summary files are cleaned up after archiving.
         """
         import shutil
 
@@ -261,9 +273,10 @@ class OutputManager:
             self.output_dir / "professional_backtest_report.txt",
         ]
 
-        # Also find any analysis_summary_*.txt files
-        analysis_summaries = list(self.output_dir.glob("analysis_summary_*.txt"))
-        files_to_archive.extend(analysis_summaries)
+        # Only archive the NEWEST analysis_summary (not all of them!)
+        analysis_summaries = sorted(self.output_dir.glob("analysis_summary_*.txt"), reverse=True)
+        if analysis_summaries:
+            files_to_archive.append(analysis_summaries[0])
 
         existing_files = [f for f in files_to_archive if f.exists()]
 
@@ -283,6 +296,13 @@ class OutputManager:
         for file_path in existing_files:
             target_path = run_dir / file_path.name
             shutil.copy2(file_path, target_path)
+
+        # CLEANUP: Remove ALL analysis_summary files from main folder after archiving
+        for summary_file in analysis_summaries:
+            try:
+                summary_file.unlink()
+            except Exception:
+                pass
 
         print(f"📦 Archived validation run to: {run_dir.relative_to(self.output_dir.parent)}")
         return run_dir
