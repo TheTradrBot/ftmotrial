@@ -34,6 +34,17 @@ class ActionType(Enum):
 
 
 @dataclass
+class AccountSnapshot:
+    """Snapshot of account state."""
+    balance: float
+    equity: float
+    peak_equity: float
+    daily_pnl: float
+    daily_loss_pct: float
+    total_dd_pct: float
+
+
+@dataclass
 class ChallengeConfig:
     """Configuration for challenge risk management."""
     # Core settings
@@ -116,6 +127,7 @@ class ChallengeRiskManager:
         self.trades_today: int = 0
         self.risk_mode: RiskMode = RiskMode.NORMAL
         self.halted: bool = False  # Trading halted flag
+        self.halt_reason: str = ""  # Reason for halt
         
         # Load persisted state
         self._load_state()
@@ -281,6 +293,80 @@ class ChallengeRiskManager:
             'trades_today': self.trades_today,
             'profit_pct': (self.current_balance - self.starting_balance) / self.starting_balance * 100
         }
+    
+    def run_protection_check(self) -> list:
+        """
+        Run protection checks and return list of actions to take.
+        
+        Returns:
+            List of ActionType enums
+        """
+        actions = []
+        
+        # Sync with MT5 if available
+        if self.mt5:
+            try:
+                balance = self.mt5.get_account_balance()
+                equity = self.mt5.get_account_equity()
+                self.sync_with_mt5(balance, equity)
+            except:
+                pass
+        
+        # Check for emergency
+        if self.risk_mode == RiskMode.EMERGENCY:
+            actions.append(ActionType.CLOSE_ALL)
+            self.halted = True
+            self.halt_reason = f"Emergency: Total DD {self.total_drawdown_pct:.1f}% >= {self.config.total_dd_emergency_pct}%"
+        
+        # Check for halt
+        elif self.risk_mode == RiskMode.HALTED:
+            actions.append(ActionType.HALT_NEW_TRADES)
+            self.halted = True
+            self.halt_reason = f"Daily loss {self.daily_loss_pct:.1f}% >= {self.config.daily_loss_halt_pct}%"
+        
+        # Check for conservative
+        elif self.risk_mode == RiskMode.CONSERVATIVE:
+            actions.append(ActionType.REDUCE_RISK)
+        
+        return actions
+    
+    def get_account_snapshot(self):
+        """Get current account snapshot."""
+        return AccountSnapshot(
+            balance=self.current_balance,
+            equity=self.current_equity,
+            peak_equity=self.peak_equity,
+            daily_pnl=self.daily_pnl,
+            daily_loss_pct=self.daily_loss_pct,
+            total_dd_pct=self.total_drawdown_pct
+        )
+    
+    @property
+    def initial_balance(self) -> float:
+        """Get initial/starting balance."""
+        return self.starting_balance
+    
+    def get_partial_close_volumes(self, total_volume: float) -> Tuple[float, float, float]:
+        """
+        Calculate volumes for partial closes at TP1, TP2, TP3.
+        
+        Args:
+            total_volume: Total position volume
+            
+        Returns:
+            Tuple of (tp1_volume, tp2_volume, tp3_volume)
+        """
+        tp1_vol = round(total_volume * self.config.tp1_close_pct, 2)
+        tp2_vol = round(total_volume * self.config.tp2_close_pct, 2)
+        tp3_vol = round(total_volume * self.config.tp3_close_pct, 2)
+        
+        # Ensure at least minimum lot size
+        min_lot = 0.01
+        tp1_vol = max(min_lot, tp1_vol) if tp1_vol > 0 else 0
+        tp2_vol = max(min_lot, tp2_vol) if tp2_vol > 0 else 0
+        tp3_vol = max(min_lot, tp3_vol) if tp3_vol > 0 else 0
+        
+        return tp1_vol, tp2_vol, tp3_vol
     
     def __str__(self) -> str:
         status = self.get_status()
