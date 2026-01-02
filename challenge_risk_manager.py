@@ -42,6 +42,11 @@ class AccountSnapshot:
     daily_pnl: float
     daily_loss_pct: float
     total_dd_pct: float
+    # Additional fields needed by main_live_bot
+    daily_pnl_pct: float = 0.0          # Daily P&L as percentage (negative = loss)
+    total_drawdown_pct: float = 0.0      # Alias for total_dd_pct
+    open_positions: int = 0              # Number of open positions
+    total_risk_pct: float = 0.0          # Total risk exposure percentage
 
 
 @dataclass
@@ -340,13 +345,32 @@ class ChallengeRiskManager:
     
     def get_account_snapshot(self):
         """Get current account snapshot."""
+        # Calculate daily P&L percentage (negative = loss)
+        daily_pnl_pct = (self.daily_pnl / self.day_start_balance * 100) if self.day_start_balance > 0 else 0.0
+        
+        # Get open positions count from MT5 if available
+        open_positions = 0
+        if self.mt5_client:
+            try:
+                positions = self.mt5_client.get_positions()
+                open_positions = len(positions) if positions else 0
+            except Exception:
+                pass
+        
+        # Calculate total risk as sum of all position risks
+        total_risk_pct = open_positions * self.config.max_risk_per_trade_pct
+        
         return AccountSnapshot(
             balance=self.current_balance,
             equity=self.current_equity,
             peak_equity=self.peak_equity,
             daily_pnl=self.daily_pnl,
             daily_loss_pct=self.daily_loss_pct,
-            total_dd_pct=self.total_drawdown_pct
+            total_dd_pct=self.total_drawdown_pct,
+            daily_pnl_pct=daily_pnl_pct,
+            total_drawdown_pct=self.total_drawdown_pct,
+            open_positions=open_positions,
+            total_risk_pct=total_risk_pct
         )
     
     @property

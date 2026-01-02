@@ -207,12 +207,21 @@ class LiveTradingBot:
     
     Uses the EXACT SAME strategy logic as backtest.py for perfect parity.
     Now uses pending orders to match backtest entry behavior exactly.
+    
+    Scan Schedule:
+    - Full scan ONLY at daily close + 15 min (22:15 UTC)
+    - After daily scan, setups waiting for entry check spread/volume every 10 min
     """
     
     PENDING_SETUPS_FILE = "pending_setups.json"
     TRADING_DAYS_FILE = "trading_days.json"
-    VALIDATE_INTERVAL_MINUTES = 10
-    MAIN_LOOP_INTERVAL_SECONDS = 10
+    VALIDATE_INTERVAL_MINUTES = 10      # Check spread/volume for pending entries
+    MAIN_LOOP_INTERVAL_SECONDS = 10     # P/L monitoring
+    
+    # Daily close scan settings
+    DAILY_CLOSE_HOUR = 22               # NY close = 22:00 UTC
+    DAILY_CLOSE_DELAY_MINUTES = 15      # Wait 15 min after close for data
+    SPREAD_CHECK_INTERVAL_MINUTES = 10  # Retry spread/volume checks
     
     def __init__(self):
         self.mt5 = MT5Client(
@@ -231,6 +240,8 @@ class LiveTradingBot:
         
         self.last_scan_time: Optional[datetime] = None
         self.last_validate_time: Optional[datetime] = None
+        self.last_daily_scan_date: Optional[date] = None  # Track which day we scanned
+        self.waiting_for_entry: Dict[str, dict] = {}      # Setups waiting for good spread
         self.scan_count = 0
         self.pending_setups: Dict[str, PendingSetup] = {}
         self.symbol_map: Dict[str, str] = {}  # our_symbol -> broker_symbol
@@ -267,6 +278,114 @@ class LiveTradingBot:
                 json.dump(data, f, indent=2, default=str)
         except Exception as e:
             log.error(f"Error saving pending setups: {e}")
+    
+    def _is_daily_close_scan_time(self) -> bool:
+        """
+        Check if it's time for the daily close scan.
+        
+        Scan happens ONCE per day at 22:15 UTC (NY close + 15 min buffer).
+        This ensures we have complete daily candles before scanning.
+        """
+        now = datetime.now(timezone.utc)
+        today = now.date()
+        
+        # Already scanned today?
+        if self.last_daily_scan_date == today:
+            return False
+        
+        # Is it past scan time (22:15 UTC)?
+        scan_hour = self.DAILY_CLOSE_HOUR
+        scan_minute = self.DAILY_CLOSE_DELAY_MINUTES
+        scan_time = now.replace(hour=scan_hour, minute=scan_minute, second=0, microsecond=0)
+        
+        if now >= scan_time:
+            log.info(f"📅 Daily close scan time reached: {now.strftime('%H:%M')} UTC")
+            return True
+        
+        return False
+    
+    def _get_next_scan_time(self) -> datetime:
+        """Get the next daily close scan time."""
+        now = datetime.now(timezone.utc)
+        scan_time = now.replace(
+            hour=self.DAILY_CLOSE_HOUR,
+            minute=self.DAILY_CLOSE_DELAY_MINUTES,
+            second=0,
+            microsecond=0
+        )
+        
+        # If past today's scan time, next scan is tomorrow
+        if now >= scan_time:
+            scan_time = scan_time + timedelta(days=1)
+        
+        return scan_time
+    
+    def _retry_pending_entries(self):
+        """
+        Retry placing entries for setups waiting on spread/volume.
+        
+        Called every 10 minutes after daily scan to check if spread has improved.
+        Setups are stored in waiting_for_entry dict with their full setup info.
+        """
+        if not self.waiting_for_entry:
+            return
+        
+        log.info(f"🔄 Retrying {len(self.waiting_for_entry)} setups waiting for good spread...")
+        
+        symbols_to_remove = []
+        
+        for symbol, setup_info in list(self.waiting_for_entry.items()):
+            try:
+                broker_symbol = self.symbol_map.get(symbol)
+                if not broker_symbol:
+                    broker_symbol = oanda_to_ftmo(symbol)
+                
+                # Check spread
+                tick = self.mt5.get_tick(broker_symbol)
+                if tick is None:
+                    log.warning(f"[{symbol}] Cannot get tick for spread check")
+                    continue
+                
+                pip_size = get_pip_size(symbol)
+                if pip_size <= 0:
+                    pip_size = 0.0001
+                
+                current_spread_pips = tick.spread / pip_size
+                max_spread = FIVEERS_CONFIG.get_max_spread_pips(symbol)
+                
+                if FIVEERS_CONFIG.is_spread_acceptable(symbol, current_spread_pips):
+                    log.info(f"[{symbol}] ✅ Spread now acceptable: {current_spread_pips:.1f} pips - placing entry!")
+                    
+                    # Try to place the trade using the stored setup dict
+                    if self.place_setup_order(setup_info):
+                        symbols_to_remove.append(symbol)
+                        log.info(f"[{symbol}] ✅ Entry placed after spread wait")
+                    else:
+                        log.warning(f"[{symbol}] Failed to place entry after spread improvement")
+                else:
+                    # Check how long we've been waiting
+                    wait_time = setup_info.get("wait_start", datetime.now(timezone.utc))
+                    if isinstance(wait_time, str):
+                        wait_time = datetime.fromisoformat(wait_time)
+                    hours_waiting = (datetime.now(timezone.utc) - wait_time).total_seconds() / 3600
+                    
+                    if hours_waiting > 24:
+                        log.warning(f"[{symbol}] Setup expired after 24h waiting for spread (current: {current_spread_pips:.1f} > {max_spread:.1f})")
+                        symbols_to_remove.append(symbol)
+                    else:
+                        log.info(f"[{symbol}] Still waiting for spread: {current_spread_pips:.1f} > {max_spread:.1f} pips (waiting {hours_waiting:.1f}h)")
+                
+                time.sleep(0.2)
+                
+            except Exception as e:
+                log.error(f"[{symbol}] Error retrying entry: {e}")
+        
+        # Remove processed setups
+        for symbol in symbols_to_remove:
+            del self.waiting_for_entry[symbol]
+        
+        if symbols_to_remove:
+            log.info(f"Removed {len(symbols_to_remove)} setups from waiting list")
     
     def _load_trading_days(self):
         """Load trading days from file for FTMO minimum trading days tracking."""
@@ -886,7 +1005,15 @@ class LiveTradingBot:
                 
                 if not FIVEERS_CONFIG.is_spread_acceptable(symbol, current_spread_pips):
                     max_spread = FIVEERS_CONFIG.get_max_spread_pips(symbol)
-                    log.warning(f"[{symbol}] Spread too wide: {current_spread_pips:.1f} pips > {max_spread:.1f} pips max - skipping trade")
+                    log.warning(f"[{symbol}] Spread too wide: {current_spread_pips:.1f} pips > {max_spread:.1f} pips max - adding to retry queue")
+                    
+                    # Add to waiting_for_entry for retry every 10 min
+                    if symbol not in self.waiting_for_entry:
+                        setup["wait_start"] = datetime.now(timezone.utc).isoformat()
+                        setup["broker_symbol"] = broker_symbol
+                        self.waiting_for_entry[symbol] = setup
+                        log.info(f"[{symbol}] Added to spread retry queue (will retry every 10 min)")
+                    
                     return False
                 
                 log.info(f"[{symbol}] Spread check passed: {current_spread_pips:.1f} pips")
@@ -1787,8 +1914,8 @@ class LiveTradingBot:
         log.info(f"  - Partial TPs: 45% TP1, 30% TP2, 25% TP3 (Challenge Mode)")
         log.info(f"Server: {MT5_SERVER}")
         log.info(f"Login: {MT5_LOGIN}")
-        log.info(f"Scan Interval: {SCAN_INTERVAL_HOURS} hours")
-        log.info(f"Validate Interval: {self.VALIDATE_INTERVAL_MINUTES} minutes")
+        log.info(f"Daily Close Scan: {self.DAILY_CLOSE_HOUR}:{self.DAILY_CLOSE_DELAY_MINUTES:02d} UTC")
+        log.info(f"Spread Retry Interval: {self.SPREAD_CHECK_INTERVAL_MINUTES} minutes")
         log.info(f"P/L Monitor Interval: {self.MAIN_LOOP_INTERVAL_SECONDS} seconds (elite protection)")
         log.info(f"Strategy Mode: {SIGNAL_MODE}")
         log.info(f"Min Confluence: {MIN_CONFLUENCE}/7")
@@ -1804,7 +1931,23 @@ class LiveTradingBot:
         
         global running
         
-        self.scan_all_symbols()
+        # Check if we should do initial scan
+        now = datetime.now(timezone.utc)
+        next_scan_time = self._get_next_scan_time()
+        
+        # If within 1 hour of next scan time, just wait
+        hours_until_scan = (next_scan_time - now).total_seconds() / 3600
+        if hours_until_scan < 1:
+            log.info(f"📅 Next daily scan in {hours_until_scan*60:.0f} minutes - waiting")
+        elif hours_until_scan > 20:  
+            # Just started and next scan is tomorrow - we missed today's scan, do one now
+            log.info("📅 Startup scan: checking for existing setups from last daily close")
+            self.scan_all_symbols()
+            # Mark that we did an initial scan (not a daily close scan)
+            log.info(f"📅 Next scheduled daily scan: {next_scan_time.strftime('%Y-%m-%d %H:%M')} UTC")
+        else:
+            log.info(f"📅 Next daily scan at: {next_scan_time.strftime('%Y-%m-%d %H:%M')} UTC ({hours_until_scan:.1f}h)")
+        
         self.last_validate_time = datetime.now(timezone.utc)
         last_protection_check = datetime.now(timezone.utc)
         emergency_triggered = False
@@ -1842,15 +1985,21 @@ class LiveTradingBot:
                 self.check_pending_orders()
                 self.check_position_updates()
                 
+                # Validate existing setups and retry spread/volume checks every 10 min
                 if self.last_validate_time:
                     next_validate = self.last_validate_time + timedelta(minutes=self.VALIDATE_INTERVAL_MINUTES)
                     if now >= next_validate:
                         self.validate_all_setups()
+                        # Also retry entries for setups waiting on spread
+                        self._retry_pending_entries()
                 
-                if self.last_scan_time:
-                    next_scan = self.last_scan_time + timedelta(hours=SCAN_INTERVAL_HOURS)
-                    if now >= next_scan:
-                        self.scan_all_symbols()
+                # Daily close scan at 22:15 UTC (ONCE per day)
+                if self._is_daily_close_scan_time():
+                    log.info("🔔 DAILY CLOSE SCAN - Scanning all symbols for new setups")
+                    self.scan_all_symbols()
+                    self.last_daily_scan_date = now.date()
+                    next_scan = self._get_next_scan_time()
+                    log.info(f"Next daily scan: {next_scan.strftime('%Y-%m-%d %H:%M')} UTC")
                 
                 if not self.mt5.connected:
                     log.warning("MT5 connection lost, attempting reconnect...")
