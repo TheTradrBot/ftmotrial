@@ -123,9 +123,21 @@ class StrategyParams:
     min_quality_factors: int = 3
     
     atr_sl_multiplier: float = 1.5
-    atr_tp1_multiplier: float = 0.6
-    atr_tp2_multiplier: float = 1.2
-    atr_tp3_multiplier: float = 2.0
+    
+    # ============================================================================
+    # TP R-MULTIPLES (Optimizer uses these - MUST match live bot!)
+    # ============================================================================
+    # These are the actual TP levels as R-multiples that the optimizer tunes.
+    # tp1_r_multiple=1.7 means TP1 is at 1.7R from entry.
+    tp1_r_multiple: float = 1.7  # TP1 at 1.7R (run009 optimized default)
+    tp2_r_multiple: float = 2.7  # TP2 at 2.7R (run009 optimized default)
+    tp3_r_multiple: float = 6.0  # TP3 at 6.0R (run009 optimized default)
+    
+    # Legacy ATR multipliers (kept for backward compatibility, deprecated)
+    # Use tp*_r_multiple instead - these are the same concept.
+    atr_tp1_multiplier: float = 1.7  # DEPRECATED: Use tp1_r_multiple
+    atr_tp2_multiplier: float = 2.7  # DEPRECATED: Use tp2_r_multiple
+    atr_tp3_multiplier: float = 6.0  # DEPRECATED: Use tp3_r_multiple
     atr_tp4_multiplier: float = 3.0
     atr_tp5_multiplier: float = 4.0
     

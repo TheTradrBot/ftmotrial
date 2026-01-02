@@ -130,8 +130,14 @@ BROKER_NAME = BROKER_CONFIG.broker_name
 try:
     from params.params_loader import get_min_confluence
     MIN_CONFLUENCE = get_min_confluence()
-except Exception:
-    MIN_CONFLUENCE = 5  # Fallback if params not available
+    if MIN_CONFLUENCE is None:
+        raise ValueError("get_min_confluence returned None")
+except Exception as e:
+    # CRITICAL: Fallback must match run009 optimization
+    # Run009 optimized min_confluence=2 for best Sharpe ratio
+    MIN_CONFLUENCE = 2  # run009 optimized value
+    import logging
+    logging.warning(f"⚠️ Failed to load min_confluence from params: {e}. Using run009 default: {MIN_CONFLUENCE}")
 
 # Get tradable symbols from broker config (respects excluded_symbols)
 TRADABLE_SYMBOLS = BROKER_CONFIG.get_tradable_symbols()

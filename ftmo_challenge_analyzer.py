@@ -1167,7 +1167,17 @@ def run_full_period_backtest(
                 adx_trend_threshold=adx_trend_threshold,
                 adx_range_threshold=adx_range_threshold,
                 use_adx_regime_filter=use_adx_regime_filter,
-                # NEW: TP parameters
+                # ============================================================================
+                # CRITICAL: TP R-multiples - MUST be passed to match live bot!
+                # ============================================================================
+                tp1_r_multiple=tp1_r_multiple,
+                tp2_r_multiple=tp2_r_multiple,
+                tp3_r_multiple=tp3_r_multiple,
+                # Also update legacy atr_tp*_multiplier to same values for compatibility
+                atr_tp1_multiplier=tp1_r_multiple,
+                atr_tp2_multiplier=tp2_r_multiple,
+                atr_tp3_multiplier=tp3_r_multiple,
+                # TP close percentages
                 tp1_close_pct=tp1_close_pct,
                 tp2_close_pct=tp2_close_pct,
                 tp3_close_pct=tp3_close_pct,
