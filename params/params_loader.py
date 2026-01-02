@@ -30,7 +30,7 @@ def load_params_dict() -> Dict[str, Any]:
     Load raw parameters dictionary from JSON file.
     
     Returns:
-        Dict with all parameters
+        Dict with all parameters (extracted from 'parameters' key if present)
         
     Raises:
         ParamsNotFoundError: If params file doesn't exist
@@ -42,7 +42,14 @@ def load_params_dict() -> Dict[str, Any]:
         )
     
     with open(PARAMS_FILE, 'r') as f:
-        return json.load(f)
+        data = json.load(f)
+    
+    # Handle new format: params are under 'parameters' key
+    if "parameters" in data:
+        return data["parameters"]
+    
+    # Old format: params at root level
+    return data
 
 
 def load_strategy_params():

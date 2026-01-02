@@ -451,8 +451,61 @@ class Fiveers60KConfig:
         return loss_streak
 
 
-# Global configuration instance
-FIVEERS_CONFIG = Fiveers60KConfig()
+def _load_optimized_config() -> Fiveers60KConfig:
+    """
+    Load Fiveers60KConfig with optimized parameters from current_params.json.
+    
+    This ensures the live bot uses the SAME parameters as the best backtest run.
+    Falls back to defaults if params file not found.
+    """
+    config = Fiveers60KConfig()
+    
+    try:
+        from params.params_loader import load_params_dict
+        params = load_params_dict()
+        
+        # Override with optimized values
+        if "risk_per_trade_pct" in params:
+            config.risk_per_trade_pct = params["risk_per_trade_pct"]
+        
+        if "min_confluence" in params:
+            config.min_confluence_score = params["min_confluence"]
+        
+        if "min_quality_factors" in params:
+            config.min_quality_factors = params["min_quality_factors"]
+        
+        # TP R-multiples
+        if "tp1_r_multiple" in params:
+            config.tp1_r_multiple = params["tp1_r_multiple"]
+        if "tp2_r_multiple" in params:
+            config.tp2_r_multiple = params["tp2_r_multiple"]
+        if "tp3_r_multiple" in params:
+            config.tp3_r_multiple = params["tp3_r_multiple"]
+        
+        # TP close percentages
+        if "tp1_close_pct" in params:
+            config.tp1_close_pct = params["tp1_close_pct"]
+        if "tp2_close_pct" in params:
+            config.tp2_close_pct = params["tp2_close_pct"]
+        if "tp3_close_pct" in params:
+            config.tp3_close_pct = params["tp3_close_pct"]
+        
+        # Risk limits
+        if "daily_loss_halt_pct" in params:
+            config.daily_loss_halt_pct = params["daily_loss_halt_pct"]
+        if "max_total_dd_warning" in params:
+            config.total_dd_warning_pct = params["max_total_dd_warning"]
+        
+        print(f"[ftmo_config] ✓ Loaded optimized params: risk={config.risk_per_trade_pct}%, min_conf={config.min_confluence_score}, tp1={config.tp1_r_multiple}R")
+        
+    except Exception as e:
+        print(f"[ftmo_config] ⚠️ Using defaults (params load failed: {e})")
+    
+    return config
+
+
+# Global configuration instance - now with optimized params!
+FIVEERS_CONFIG = _load_optimized_config()
 
 # Backwards compatibility aliases
 FTMO_CONFIG = FIVEERS_CONFIG
