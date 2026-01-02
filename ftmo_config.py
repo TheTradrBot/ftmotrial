@@ -489,6 +489,10 @@ def _load_optimized_config() -> Fiveers60KConfig:
             config.tp2_close_pct = params["tp2_close_pct"]
         if "tp3_close_pct" in params:
             config.tp3_close_pct = params["tp3_close_pct"]
+        if "tp4_close_pct" in params:
+            config.tp4_close_pct = params["tp4_close_pct"]
+        if "tp5_close_pct" in params:
+            config.tp5_close_pct = params["tp5_close_pct"]
         
         # Risk limits
         if "daily_loss_halt_pct" in params:

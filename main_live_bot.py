@@ -1871,17 +1871,14 @@ class LiveTradingBot:
         """
         Manage partial take profits for active positions.
         
-        Challenge Mode Strategy (FTMO Optimized):
-        - TP1 hit: Close 45% of position volume at +0.8-1R
-        - TP2 hit: Close 30% at +2R
-        - TP3 hit: Close remaining 25% at +3-4R or trailing
-        - Move SL to breakeven + buffer after TP1
+        MATCHED TO BACKTEST (simulate_trades in strategy_core.py):
+        - TP1 hit (0.6R): Close tp1_close_pct (34%), SL → entry (breakeven)
+        - TP2 hit (1.2R): Close tp2_close_pct (16%), SL → TP1 + 0.5R
+        - TP3 hit (2.0R): Close tp3_close_pct (35%), SL → TP2 + 0.5R
+        - TP4 hit (3.0R): Close tp4_close_pct (default 20%), SL → TP3 + 0.5R
+        - TP5 hit (4.0R): Close remainder (tp5_close_pct)
         
-        Standard Mode:
-        - TP1 hit: Close 33% of position volume
-        - TP2 hit: Close 50% of remaining
-        - TP3 hit: Close remainder
-        
+        Trailing SL progression matches backtest exactly.
         Tracks partial close state in pending_setups.
         """
         positions = self.mt5.get_my_positions()
@@ -1907,86 +1904,143 @@ class LiveTradingBot:
             tp1 = setup.tp1
             tp2 = setup.tp2
             tp3 = setup.tp3
+            tp4 = getattr(setup, 'tp4', None)
+            tp5 = getattr(setup, 'tp5', None)
+            
+            # Calculate risk for trailing SL progression
+            risk = abs(setup.entry_price - setup.stop_loss)
             
             partial_state = getattr(setup, 'partial_closes', 0) if hasattr(setup, 'partial_closes') else 0
             
             tp1_hit = False
             tp2_hit = False
             tp3_hit = False
+            tp4_hit = False
+            tp5_hit = False
             
             if setup.direction == "bullish":
                 tp1_hit = current_price >= tp1 if tp1 else False
                 tp2_hit = current_price >= tp2 if tp2 else False
                 tp3_hit = current_price >= tp3 if tp3 else False
+                tp4_hit = current_price >= tp4 if tp4 else False
+                tp5_hit = current_price >= tp5 if tp5 else False
             else:
                 tp1_hit = current_price <= tp1 if tp1 else False
                 tp2_hit = current_price <= tp2 if tp2 else False
                 tp3_hit = current_price <= tp3 if tp3 else False
+                tp4_hit = current_price <= tp4 if tp4 else False
+                tp5_hit = current_price <= tp5 if tp5 else False
             
             original_volume = setup.lot_size
             current_volume = pos.volume
             
-            # EXACT same partial close volumes as backtest_live_bot.py
-            if CHALLENGE_MODE and self.challenge_manager:
-                tp1_vol, tp2_vol, tp3_vol = self.challenge_manager.get_partial_close_volumes(original_volume)
-            else:
-                # Match backtest: 45% TP1, 30% TP2, 25% TP3
-                tp1_vol = round(original_volume * FIVEERS_CONFIG.tp1_close_pct, 2)
-                tp2_vol = round(original_volume * FIVEERS_CONFIG.tp2_close_pct, 2)
-                tp3_vol = round(original_volume * FIVEERS_CONFIG.tp3_close_pct, 2)
+            # Get partial close percentages from config (matches backtest StrategyParams)
+            tp1_pct = FIVEERS_CONFIG.tp1_close_pct  # 0.34 (34%)
+            tp2_pct = FIVEERS_CONFIG.tp2_close_pct  # 0.16 (16%)
+            tp3_pct = FIVEERS_CONFIG.tp3_close_pct  # 0.35 (35%)
+            tp4_pct = getattr(FIVEERS_CONFIG, 'tp4_close_pct', 0.10)  # 10% for TP4
+            tp5_pct = getattr(FIVEERS_CONFIG, 'tp5_close_pct', 0.05)  # 5% remainder for TP5
             
-            tp1_vol = max(0.01, tp1_vol)
-            tp2_vol = max(0.01, tp2_vol)
-            tp3_vol = max(0.01, tp3_vol)
+            tp1_vol = max(0.01, round(original_volume * tp1_pct, 2))
+            tp2_vol = max(0.01, round(original_volume * tp2_pct, 2))
+            tp3_vol = max(0.01, round(original_volume * tp3_pct, 2))
+            tp4_vol = max(0.01, round(original_volume * tp4_pct, 2))
+            tp5_vol = max(0.01, round(original_volume * tp5_pct, 2))
             
+            # TP1 HIT: Close 34%, SL → entry (breakeven)
             if tp1_hit and partial_state == 0:
                 close_volume = min(tp1_vol, current_volume)
                 
                 if close_volume >= 0.01:
-                    pct_display = int((tp1_vol / original_volume) * 100) if original_volume > 0 else 0
-                    log.info(f"[{symbol}] TP1 HIT! Closing {pct_display}% ({close_volume} lots) of position")
+                    pct_display = int(tp1_pct * 100)
+                    log.info(f"[{symbol}] TP1 HIT ({self.params.atr_tp1_multiplier}R)! Closing {pct_display}% ({close_volume} lots)")
                     result = self.mt5.partial_close(pos.ticket, close_volume)
                     if result.success:
                         log.info(f"[{symbol}] Partial close successful at {result.price}")
                         setup.partial_closes = 1
                         self._save_pending_setups()
                         
-                        be_buffer = abs(setup.entry_price - setup.stop_loss) * 0.1
-                        if setup.direction == "bullish":
-                            new_sl = setup.entry_price + be_buffer
-                        else:
-                            new_sl = setup.entry_price - be_buffer
-                        
-                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp2 if tp2 else tp1)
-                        log.info(f"[{symbol}] SL moved to BE+buffer ({new_sl:.5f}), TP updated to TP2: {tp2 if tp2 else 'N/A'}")
+                        # BACKTEST MATCH: SL → entry (breakeven, no buffer)
+                        new_sl = setup.entry_price
+                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp2 if tp2 else None)
+                        log.info(f"[{symbol}] SL moved to breakeven ({new_sl:.5f})")
                     else:
                         log.error(f"[{symbol}] Partial close failed: {result.error}")
             
+            # TP2 HIT: Close 16%, SL → TP1 + 0.5R
             elif tp2_hit and partial_state == 1:
-                remaining_volume = current_volume
-                close_volume = min(tp2_vol, remaining_volume)
+                close_volume = min(tp2_vol, current_volume)
                 if close_volume >= 0.01:
-                    pct_display = int((tp2_vol / original_volume) * 100) if original_volume > 0 else 0
-                    log.info(f"[{symbol}] TP2 HIT! Closing {pct_display}% ({close_volume} lots)")
+                    pct_display = int(tp2_pct * 100)
+                    log.info(f"[{symbol}] TP2 HIT ({self.params.atr_tp2_multiplier}R)! Closing {pct_display}% ({close_volume} lots)")
                     result = self.mt5.partial_close(pos.ticket, close_volume)
                     if result.success:
                         log.info(f"[{symbol}] Partial close successful at {result.price}")
                         setup.partial_closes = 2
                         self._save_pending_setups()
                         
-                        if tp3:
-                            self.mt5.modify_sl_tp(pos.ticket, tp=tp3)
-                            log.info(f"[{symbol}] TP updated to TP3: {tp3}")
+                        # BACKTEST MATCH: SL → TP1 + 0.5R
+                        if setup.direction == "bullish":
+                            new_sl = tp1 + (0.5 * risk)
+                        else:
+                            new_sl = tp1 - (0.5 * risk)
+                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp3 if tp3 else None)
+                        log.info(f"[{symbol}] SL moved to TP1+0.5R ({new_sl:.5f})")
                     else:
                         log.error(f"[{symbol}] Partial close failed: {result.error}")
             
+            # TP3 HIT: Close 35%, SL → TP2 + 0.5R
             elif tp3_hit and partial_state == 2:
-                log.info(f"[{symbol}] TP3 HIT! Closing remainder of position")
+                close_volume = min(tp3_vol, current_volume)
+                if close_volume >= 0.01:
+                    pct_display = int(tp3_pct * 100)
+                    log.info(f"[{symbol}] TP3 HIT ({self.params.atr_tp3_multiplier}R)! Closing {pct_display}% ({close_volume} lots)")
+                    result = self.mt5.partial_close(pos.ticket, close_volume)
+                    if result.success:
+                        log.info(f"[{symbol}] Partial close successful at {result.price}")
+                        setup.partial_closes = 3
+                        self._save_pending_setups()
+                        
+                        # BACKTEST MATCH: SL → TP2 + 0.5R
+                        if setup.direction == "bullish":
+                            new_sl = tp2 + (0.5 * risk)
+                        else:
+                            new_sl = tp2 - (0.5 * risk)
+                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp4 if tp4 else None)
+                        log.info(f"[{symbol}] SL moved to TP2+0.5R ({new_sl:.5f})")
+                    else:
+                        log.error(f"[{symbol}] Partial close failed: {result.error}")
+            
+            # TP4 HIT: Close 10%, SL → TP3 + 0.5R
+            elif tp4_hit and partial_state == 3 and tp4:
+                close_volume = min(tp4_vol, current_volume)
+                if close_volume >= 0.01:
+                    pct_display = int(tp4_pct * 100)
+                    log.info(f"[{symbol}] TP4 HIT ({self.params.atr_tp4_multiplier}R)! Closing {pct_display}% ({close_volume} lots)")
+                    result = self.mt5.partial_close(pos.ticket, close_volume)
+                    if result.success:
+                        log.info(f"[{symbol}] Partial close successful at {result.price}")
+                        setup.partial_closes = 4
+                        self._save_pending_setups()
+                        
+                        # BACKTEST MATCH: SL → TP3 + 0.5R
+                        if setup.direction == "bullish":
+                            new_sl = tp3 + (0.5 * risk)
+                        else:
+                            new_sl = tp3 - (0.5 * risk)
+                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp5 if tp5 else None)
+                        log.info(f"[{symbol}] SL moved to TP3+0.5R ({new_sl:.5f})")
+                    else:
+                        log.error(f"[{symbol}] Partial close failed: {result.error}")
+            
+            # TP5 HIT: Close remainder (full exit)
+            elif tp5_hit and partial_state == 4 and tp5:
+                log.info(f"[{symbol}] TP5 HIT ({self.params.atr_tp5_multiplier}R)! Closing remainder of position")
                 result = self.mt5.close_position(pos.ticket)
                 if result.success:
-                    log.info(f"[{symbol}] Position fully closed at {result.price}")
+                    log.info(f"[{symbol}] Position fully closed at TP5 ({result.price})")
                     setup.status = "closed"
-                    setup.partial_closes = 3
+                    setup.partial_closes = 5
                     self._save_pending_setups()
                 else:
                     log.error(f"[{symbol}] Failed to close position: {result.error}")

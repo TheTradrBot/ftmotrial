@@ -25,6 +25,8 @@
     "tp1_close_pct": 0.34,
     "tp2_close_pct": 0.16,
     "tp3_close_pct": 0.35,
+    "tp4_close_pct": 0.10,
+    "tp5_close_pct": 0.05,
     "use_htf_filter": false,
     "use_structure_filter": false,
     "use_confirmation_filter": false,
