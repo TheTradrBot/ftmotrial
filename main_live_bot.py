@@ -206,22 +206,31 @@ class LiveTradingBot:
     Main live trading bot.
     
     Uses the EXACT SAME strategy logic as backtest.py for perfect parity.
-    Now uses pending orders to match backtest entry behavior exactly.
     
-    Scan Schedule:
-    - Full scan ONLY at daily close + 15 min (22:15 UTC)
-    - After daily scan, setups waiting for entry check spread/volume every 10 min
+    BACKTEST-MATCHED EXECUTION MODEL:
+    - Daily close scan at 22:15 UTC generates signals with entry levels
+    - Signals are stored in watching_setups (NOT placed as orders)
+    - Every 15 min, we check if price has reached entry level
+    - When price reaches entry AND spread is OK → MARKET ORDER
+    - Setups expire after 5 days (matching backtest's 5-bar wait)
+    
+    This matches backtest logic:
+        if low <= entry <= high: entry_price = theoretical_entry
     """
     
     PENDING_SETUPS_FILE = "pending_setups.json"
+    WATCHING_SETUPS_FILE = "watching_setups.json"
     TRADING_DAYS_FILE = "trading_days.json"
-    VALIDATE_INTERVAL_MINUTES = 10      # Check spread/volume for pending entries
+    VALIDATE_INTERVAL_MINUTES = 10      # Validate filled positions
     MAIN_LOOP_INTERVAL_SECONDS = 10     # P/L monitoring
     
     # Daily close scan settings
     DAILY_CLOSE_HOUR = 22               # NY close = 22:00 UTC
     DAILY_CLOSE_DELAY_MINUTES = 15      # Wait 15 min after close for data
-    SPREAD_CHECK_INTERVAL_MINUTES = 10  # Retry spread/volume checks
+    
+    # Entry monitoring settings (matches backtest)
+    ENTRY_CHECK_INTERVAL_MINUTES = 15   # Check if price reached entry (fast enough for intraday)
+    SETUP_EXPIRY_DAYS = 5               # Setups expire after 5 days (like backtest 5-bar wait)
     
     def __init__(self):
         self.mt5 = MT5Client(
@@ -240,8 +249,9 @@ class LiveTradingBot:
         
         self.last_scan_time: Optional[datetime] = None
         self.last_validate_time: Optional[datetime] = None
+        self.last_entry_check_time: Optional[datetime] = None  # Track entry monitoring
         self.last_daily_scan_date: Optional[date] = None  # Track which day we scanned
-        self.waiting_for_entry: Dict[str, dict] = {}      # Setups waiting for good spread
+        self.watching_setups: Dict[str, dict] = {}        # Setups waiting for price to reach entry
         self.scan_count = 0
         self.pending_setups: Dict[str, PendingSetup] = {}
         self.symbol_map: Dict[str, str] = {}  # our_symbol -> broker_symbol
@@ -254,6 +264,7 @@ class LiveTradingBot:
         self.challenge_end_date: Optional[datetime] = None
         
         self._load_pending_setups()
+        self._load_watching_setups()  # Load setups waiting for price to reach entry
         self._load_trading_days()
         self._auto_start_challenge()
     
@@ -320,72 +331,330 @@ class LiveTradingBot:
         
         return scan_time
     
-    def _retry_pending_entries(self):
+    def _load_watching_setups(self):
+        """Load watching setups from file (setups waiting for price to reach entry)."""
+        try:
+            if Path(self.WATCHING_SETUPS_FILE).exists():
+                with open(self.WATCHING_SETUPS_FILE, 'r') as f:
+                    self.watching_setups = json.load(f)
+                log.info(f"Loaded {len(self.watching_setups)} watching setups from file")
+        except Exception as e:
+            log.error(f"Error loading watching setups: {e}")
+            self.watching_setups = {}
+    
+    def _save_watching_setups(self):
+        """Save watching setups to file."""
+        try:
+            with open(self.WATCHING_SETUPS_FILE, 'w') as f:
+                json.dump(self.watching_setups, f, indent=2, default=str)
+        except Exception as e:
+            log.error(f"Error saving watching setups: {e}")
+    
+    def _check_entry_levels(self):
         """
-        Retry placing entries for setups waiting on spread/volume.
+        Check if price has reached entry level for watching setups.
         
-        Called every 10 minutes after daily scan to check if spread has improved.
-        Setups are stored in waiting_for_entry dict with their full setup info.
+        MATCHES BACKTEST LOGIC EXACTLY:
+        - Backtest: if low <= entry <= high → entry_price = theoretical_entry
+        - Live: if current_price crosses entry level → place MARKET ORDER
+        
+        Called every 15 minutes to check all watching setups.
+        This is the core of backtest-matched execution.
         """
-        if not self.waiting_for_entry:
+        if not self.watching_setups:
             return
         
-        log.info(f"🔄 Retrying {len(self.waiting_for_entry)} setups waiting for good spread...")
+        log.info(f"🔍 Checking entry levels for {len(self.watching_setups)} watching setups...")
         
         symbols_to_remove = []
+        entries_placed = 0
         
-        for symbol, setup_info in list(self.waiting_for_entry.items()):
+        for symbol, setup_info in list(self.watching_setups.items()):
             try:
                 broker_symbol = self.symbol_map.get(symbol)
                 if not broker_symbol:
                     broker_symbol = oanda_to_ftmo(symbol)
                 
-                # Check spread
-                tick = self.mt5.get_tick(broker_symbol)
-                if tick is None:
-                    log.warning(f"[{symbol}] Cannot get tick for spread check")
+                # Check if we already have a position
+                if self.check_existing_position(broker_symbol):
+                    log.info(f"[{symbol}] Already in position, removing from watching list")
+                    symbols_to_remove.append(symbol)
                     continue
                 
+                # Get current tick
+                tick = self.mt5.get_tick(broker_symbol)
+                if tick is None:
+                    log.warning(f"[{symbol}] Cannot get tick for entry check")
+                    continue
+                
+                entry = setup_info["entry"]
+                direction = setup_info["direction"]
+                sl = setup_info["stop_loss"]
+                created_at = setup_info.get("created_at", datetime.now(timezone.utc).isoformat())
+                
+                if isinstance(created_at, str):
+                    created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                
+                # Check 5-day expiration (matches backtest 5-bar wait)
+                days_watching = (datetime.now(timezone.utc) - created_at).total_seconds() / 86400
+                if days_watching > self.SETUP_EXPIRY_DAYS:
+                    log.info(f"[{symbol}] Setup expired after {days_watching:.1f} days (max: {self.SETUP_EXPIRY_DAYS})")
+                    symbols_to_remove.append(symbol)
+                    continue
+                
+                # Current price based on direction
+                current_price = tick.bid if direction == "bullish" else tick.ask
+                
+                # Check if price has reached entry level
+                # For bullish: price should drop TO or BELOW entry, then we buy
+                # For bearish: price should rise TO or ABOVE entry, then we sell
+                entry_reached = False
+                
+                if direction == "bullish":
+                    # Bullish entry: we want to buy when price drops to entry level
+                    # Entry reached if current price <= entry (price came down to our level)
+                    if current_price <= entry:
+                        entry_reached = True
+                        log.info(f"[{symbol}] 🎯 BULLISH entry reached: price {current_price:.5f} <= entry {entry:.5f}")
+                else:
+                    # Bearish entry: we want to sell when price rises to entry level
+                    # Entry reached if current price >= entry (price came up to our level)
+                    if current_price >= entry:
+                        entry_reached = True
+                        log.info(f"[{symbol}] 🎯 BEARISH entry reached: price {current_price:.5f} >= entry {entry:.5f}")
+                
+                if not entry_reached:
+                    # Log progress occasionally
+                    distance = abs(current_price - entry)
+                    risk = abs(entry - sl)
+                    distance_r = distance / risk if risk > 0 else 0
+                    log.debug(f"[{symbol}] Watching: {direction} entry {entry:.5f}, current {current_price:.5f} ({distance_r:.2f}R away), day {days_watching:.1f}/{self.SETUP_EXPIRY_DAYS}")
+                    continue
+                
+                # Entry level reached! Now check spread
                 pip_size = get_pip_size(symbol)
                 if pip_size <= 0:
                     pip_size = 0.0001
                 
                 current_spread_pips = tick.spread / pip_size
-                max_spread = FIVEERS_CONFIG.get_max_spread_pips(symbol)
                 
-                if FIVEERS_CONFIG.is_spread_acceptable(symbol, current_spread_pips):
-                    log.info(f"[{symbol}] ✅ Spread now acceptable: {current_spread_pips:.1f} pips - placing entry!")
-                    
-                    # Try to place the trade using the stored setup dict
-                    if self.place_setup_order(setup_info):
-                        symbols_to_remove.append(symbol)
-                        log.info(f"[{symbol}] ✅ Entry placed after spread wait")
-                    else:
-                        log.warning(f"[{symbol}] Failed to place entry after spread improvement")
+                if not FIVEERS_CONFIG.is_spread_acceptable(symbol, current_spread_pips):
+                    max_spread = FIVEERS_CONFIG.get_max_spread_pips(symbol)
+                    log.warning(f"[{symbol}] Entry level reached but spread too wide: {current_spread_pips:.1f} > {max_spread:.1f} pips - will retry")
+                    continue
+                
+                # ENTRY LEVEL REACHED + SPREAD OK → PLACE MARKET ORDER!
+                log.info(f"[{symbol}] ✅ Entry level reached + spread OK ({current_spread_pips:.1f} pips) - placing MARKET ORDER!")
+                
+                # Update setup with current price for order placement
+                setup_info["current_price"] = current_price
+                
+                if self._place_market_entry(setup_info):
+                    symbols_to_remove.append(symbol)
+                    entries_placed += 1
+                    log.info(f"[{symbol}] ✅ MARKET ORDER PLACED - matched backtest entry behavior!")
                 else:
-                    # Check how long we've been waiting
-                    wait_time = setup_info.get("wait_start", datetime.now(timezone.utc))
-                    if isinstance(wait_time, str):
-                        wait_time = datetime.fromisoformat(wait_time)
-                    hours_waiting = (datetime.now(timezone.utc) - wait_time).total_seconds() / 3600
-                    
-                    if hours_waiting > 24:
-                        log.warning(f"[{symbol}] Setup expired after 24h waiting for spread (current: {current_spread_pips:.1f} > {max_spread:.1f})")
-                        symbols_to_remove.append(symbol)
-                    else:
-                        log.info(f"[{symbol}] Still waiting for spread: {current_spread_pips:.1f} > {max_spread:.1f} pips (waiting {hours_waiting:.1f}h)")
+                    log.warning(f"[{symbol}] Failed to place market order")
                 
                 time.sleep(0.2)
                 
             except Exception as e:
-                log.error(f"[{symbol}] Error retrying entry: {e}")
+                log.error(f"[{symbol}] Error checking entry level: {e}")
+                import traceback
+                log.error(traceback.format_exc())
         
         # Remove processed setups
         for symbol in symbols_to_remove:
-            del self.waiting_for_entry[symbol]
+            if symbol in self.watching_setups:
+                del self.watching_setups[symbol]
         
         if symbols_to_remove:
-            log.info(f"Removed {len(symbols_to_remove)} setups from waiting list")
+            self._save_watching_setups()
+            log.info(f"Removed {len(symbols_to_remove)} setups from watching list ({entries_placed} entries placed)")
+    
+    def _place_market_entry(self, setup: Dict) -> bool:
+        """
+        Place a market order when price reaches entry level.
+        
+        This is called by _check_entry_levels when the backtest condition is met:
+        - Price has reached the entry level
+        - Spread is acceptable
+        
+        Uses the same risk calculation as the original place_setup_order,
+        but ONLY places market orders (no pending orders).
+        """
+        from ftmo_config import FTMO_CONFIG, get_pip_size, get_sl_limits
+        
+        symbol = setup["symbol"]
+        broker_symbol = setup.get("broker_symbol", self.symbol_map.get(symbol, symbol))
+        direction = setup["direction"]
+        current_price = setup.get("current_price", 0)
+        entry = setup["entry"]
+        sl = setup["stop_loss"]
+        tp1 = setup["tp1"]
+        tp2 = setup.get("tp2")
+        tp3 = setup.get("tp3")
+        tp4 = setup.get("tp4")
+        tp5 = setup.get("tp5")
+        confluence = setup["confluence"]
+        quality_factors = setup["quality_factors"]
+        
+        # Check we don't already have a position
+        if symbol in self.pending_setups:
+            existing = self.pending_setups[symbol]
+            if existing.status in ["pending", "filled"]:
+                log.info(f"[{symbol}] Already have setup, skipping market entry")
+                return False
+        
+        if self.check_existing_position(broker_symbol):
+            log.info(f"[{symbol}] Already in position, skipping market entry")
+            return False
+        
+        # Risk calculations (same as place_setup_order)
+        if CHALLENGE_MODE and self.challenge_manager:
+            snapshot = self.challenge_manager.get_account_snapshot()
+            if snapshot is None:
+                log.error(f"[{symbol}] Cannot get account snapshot")
+                return False
+            
+            daily_loss_pct = abs(snapshot.daily_pnl_pct) if snapshot.daily_pnl_pct < 0 else 0
+            total_dd_pct = snapshot.total_drawdown_pct
+            profit_pct = (snapshot.equity - self.challenge_manager.initial_balance) / self.challenge_manager.initial_balance * 100
+            
+            # Check trading limits
+            if daily_loss_pct >= FIVEERS_CONFIG.daily_loss_halt_pct:
+                log.warning(f"[{symbol}] Trading halted: daily loss {daily_loss_pct:.1f}%")
+                return False
+            
+            if total_dd_pct >= FIVEERS_CONFIG.total_dd_emergency_pct:
+                log.warning(f"[{symbol}] Trading halted: total DD {total_dd_pct:.1f}%")
+                return False
+            
+            # Get risk percentage
+            if FIVEERS_CONFIG.use_dynamic_lot_sizing:
+                win_streak = getattr(self.risk_manager.state, 'win_streak', 0) if hasattr(self.risk_manager, 'state') else 0
+                loss_streak = getattr(self.risk_manager.state, 'loss_streak', 0) if hasattr(self.risk_manager, 'state') else 0
+                risk_pct = FIVEERS_CONFIG.get_dynamic_risk_pct(
+                    confluence_score=confluence,
+                    win_streak=win_streak,
+                    loss_streak=loss_streak,
+                    current_profit_pct=profit_pct,
+                    daily_loss_pct=daily_loss_pct,
+                    total_dd_pct=total_dd_pct,
+                )
+            else:
+                risk_pct = FIVEERS_CONFIG.get_risk_pct(daily_loss_pct, total_dd_pct)
+            
+            if risk_pct <= 0:
+                log.warning(f"[{symbol}] Risk percentage is 0 - trading halted")
+                return False
+            
+            from tradr.risk.position_sizing import calculate_lot_size
+            
+            symbol_info = self.mt5.get_symbol_info(broker_symbol)
+            max_lot = symbol_info.get('max_lot', 100.0) if symbol_info else 100.0
+            min_lot = symbol_info.get('min_lot', 0.01) if symbol_info else 0.01
+            
+            lot_result = calculate_lot_size(
+                symbol=broker_symbol,
+                account_balance=snapshot.balance,
+                risk_percent=risk_pct / 100,
+                entry_price=current_price,  # Use current price for market order
+                stop_loss_price=sl,
+                max_lot=max_lot,
+                min_lot=min_lot,
+            )
+            
+            if lot_result.get("error") or lot_result["lot_size"] <= 0:
+                log.warning(f"[{symbol}] Cannot calculate lot size: {lot_result.get('error', 'unknown error')}")
+                return False
+            
+            lot_size = lot_result["lot_size"]
+            risk_usd = lot_result["risk_usd"]
+            
+            if symbol_info:
+                lot_step = symbol_info.get('lot_step', 0.01)
+                lot_size = max(min_lot, round(lot_size / lot_step) * lot_step)
+                lot_size = min(lot_size, max_lot)
+            
+            log.info(f"[{symbol}] Risk: {risk_pct:.2f}% = ${risk_usd:.2f}, Lot: {lot_size}")
+        else:
+            risk_check = self.risk_manager.check_trade(
+                symbol=broker_symbol,
+                direction=direction,
+                entry_price=current_price,
+                stop_loss_price=sl,
+            )
+            
+            if not risk_check.allowed:
+                log.warning(f"[{symbol}] Trade blocked by risk manager: {risk_check.reason}")
+                return False
+            
+            lot_size = risk_check.adjusted_lot
+        
+        # PLACE MARKET ORDER (this matches backtest instant fill when price reaches entry)
+        log.info(f"[{symbol}] Placing MARKET ORDER (backtest-matched entry)")
+        log.info(f"  Direction: {direction.upper()}")
+        log.info(f"  Current Price: {current_price:.5f}")
+        log.info(f"  Original Entry Level: {entry:.5f}")
+        log.info(f"  SL: {sl:.5f}")
+        log.info(f"  Lot Size: {lot_size}")
+        
+        result = self.mt5.place_market_order(
+            symbol=broker_symbol,
+            direction=direction,
+            volume=lot_size,
+            sl=sl,
+            tp=0,  # No auto-TP - bot manages partial closes manually
+        )
+        
+        if not result.success:
+            log.error(f"[{symbol}] Market order FAILED: {result.error}")
+            return False
+        
+        log.info(f"[{symbol}] ✅ MARKET ORDER FILLED!")
+        log.info(f"  Order Ticket: {result.order_id}")
+        log.info(f"  Fill Price: {result.price:.5f}")
+        log.info(f"  Volume: {result.volume}")
+        
+        self.risk_manager.record_trade_open(
+            symbol=broker_symbol,
+            direction=direction,
+            entry_price=result.price,
+            stop_loss=sl,
+            lot_size=result.volume,
+            order_id=result.order_id,
+        )
+        
+        # Track as filled setup for TP management
+        pending_setup = PendingSetup(
+            symbol=symbol,
+            direction=direction,
+            entry_price=result.price,
+            stop_loss=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            tp4=tp4,
+            tp5=tp5,
+            confluence=confluence,
+            confluence_score=confluence,
+            quality_factors=quality_factors,
+            entry_distance_r=0,  # We're at entry
+            created_at=datetime.now(timezone.utc).isoformat(),
+            order_ticket=result.order_id,
+            status="filled",
+            lot_size=result.volume,
+        )
+        
+        self.pending_setups[symbol] = pending_setup
+        self._save_pending_setups()
+        
+        # Track trading day
+        self.trading_days.add(datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        self._save_trading_days()
+        
+        return True
     
     def _load_trading_days(self):
         """Load trading days from file for FTMO minimum trading days tracking."""
@@ -1821,35 +2090,61 @@ class LiveTradingBot:
     
     def scan_all_symbols(self):
         """
-        Scan all tradable symbols and place pending orders.
+        Scan all tradable symbols for active signals.
         
-        Uses the same logic as the backtest walk-forward loop.
-        Now places pending limit orders instead of market orders
-        to match backtest entry behavior exactly.
+        BACKTEST-MATCHED EXECUTION MODEL:
+        - Scans at daily close (22:15 UTC) just like backtest evaluates at bar close
+        - Active signals are added to watching_setups (NOT placed as orders!)
+        - Every 15 min, _check_entry_levels() monitors if price reaches entry
+        - When price reaches entry → MARKET ORDER (matches backtest instant fill)
+        
+        This ensures live trading matches backtest behavior exactly.
         """
         log.info("=" * 70)
-        log.info(f"MARKET SCAN - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+        log.info(f"DAILY CLOSE SCAN - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
         log.info(f"Strategy Mode: {SIGNAL_MODE} (Min Confluence: {MIN_CONFLUENCE}/7)")
-        log.info(f"Using PENDING ORDERS (like backtest)")
+        log.info(f"⚡ BACKTEST-MATCHED: Signals go to watching_setups, entry on price touch")
         log.info("=" * 70)
         
         self.scan_count += 1
         signals_found = 0
-        orders_placed = 0
+        setups_added = 0
         
         # Only scan symbols that are available on broker
         available_symbols = [s for s in TRADABLE_SYMBOLS if s in self.symbol_map]
         
         for symbol in available_symbols:
             try:
+                # Skip if already watching this symbol
+                if symbol in self.watching_setups:
+                    log.debug(f"[{symbol}] Already in watching_setups, skipping")
+                    continue
+                
+                # Skip if already have a position or pending setup
+                broker_symbol = self.symbol_map.get(symbol)
+                if self.check_existing_position(broker_symbol):
+                    log.debug(f"[{symbol}] Already in position, skipping")
+                    continue
+                
+                if symbol in self.pending_setups:
+                    existing = self.pending_setups[symbol]
+                    if existing.status in ["pending", "filled"]:
+                        log.debug(f"[{symbol}] Already have pending setup, skipping")
+                        continue
                 
                 setup = self.scan_symbol(symbol)
                 
                 if setup:
                     signals_found += 1
                     
-                    if self.place_setup_order(setup):
-                        orders_placed += 1
+                    # Add to watching_setups instead of placing order immediately
+                    # This matches backtest behavior: signal on bar N, wait for entry touch
+                    setup["created_at"] = datetime.now(timezone.utc).isoformat()
+                    setup["broker_symbol"] = self.symbol_map.get(symbol, symbol)
+                    self.watching_setups[symbol] = setup
+                    setups_added += 1
+                    
+                    log.info(f"[{symbol}] 👁️ Added to watching list: {setup['direction'].upper()} entry @ {setup['entry']:.5f}")
                 
                 time.sleep(0.5)
                 
@@ -1858,16 +2153,19 @@ class LiveTradingBot:
                 continue
             time.sleep(0.1)
         
+        # Save watching setups
+        if setups_added > 0:
+            self._save_watching_setups()
+        
         log.info("=" * 70)
         log.info("SCAN COMPLETE")
         log.info(f"  Symbols scanned: {len(available_symbols)}/{len(TRADABLE_SYMBOLS)}")
         log.info(f"  Active signals: {signals_found}")
-        log.info(f"  Pending orders placed: {orders_placed}")
+        log.info(f"  Added to watching: {setups_added}")
+        log.info(f"  Total watching: {len(self.watching_setups)}")
         
         positions = self.mt5.get_my_positions()
-        pending_orders = self.mt5.get_my_pending_orders()
         log.info(f"  Open positions: {len(positions)}")
-        log.info(f"  Pending orders: {len(pending_orders)}")
         log.info(f"  Tracked setups: {len(self.pending_setups)}")
         
         status = self.risk_manager.get_status()
@@ -1878,6 +2176,7 @@ class LiveTradingBot:
         log.info(f"  Max DD: {status['drawdown_pct']:.2f}%/10%")
         log.info(f"  Profitable Days: {status['profitable_days']}/{status['min_profitable_days']}")
         log.info("=" * 70)
+        log.info(f"📊 Next entry check in {self.ENTRY_CHECK_INTERVAL_MINUTES} min")
         
         self.last_scan_time = datetime.now(timezone.utc)
     
@@ -1885,38 +2184,36 @@ class LiveTradingBot:
         """
         Main trading loop - runs 24/7.
         
-        Schedule:
-        - Every 30 seconds: execute_protection_actions() (challenge mode) or monitor_live_pnl()
-        - Every 30 seconds: manage_partial_takes() for partial TP management
-        - Every minute: check_pending_orders() and check_position_updates()
-        - Every 15 min: validate_all_setups() to ensure pending orders are still valid
-        - Every 4 hours: scan_all_symbols() for new setups
+        BACKTEST-MATCHED EXECUTION SCHEDULE:
+        - Every 10 seconds: P/L monitoring and protection actions
+        - Every 10 seconds: manage_partial_takes() for partial TP management
+        - Every 15 min: _check_entry_levels() - check if price reached entry for watching setups
+        - Every 10 min: validate_all_setups() to ensure filled positions are tracked
+        - Daily at 22:15 UTC: scan_all_symbols() for new signals → watching_setups
         
-        CHALLENGE MODE ELITE PROTECTION:
-        - Global Risk Controller: Real-time P/L tracking every 30s via execute_protection_actions()
-        - Smart Position Sizing: 0.75% risk per trade, adaptive to DD
-        - Concurrent Trade Limit: Max 5 positions, auto-cancel excess pending
-        - Partial Takes: 45% TP1, 30% TP2, 25% TP3 with BE+buffer (via get_partial_close_volumes)
-        - Emergency Close: 4.5% daily loss or 8% total DD triggers halt
-        - Risk Modes: Aggressive/Normal/Conservative/Ultra-Safe based on DD
-        - Action Types: CLOSE_ALL, CANCEL_PENDING, MOVE_SL_BREAKEVEN, CLOSE_WORST, HALT_TRADING
+        This matches backtest behavior:
+        - Backtest generates signals at bar close (22:00 UTC)
+        - Backtest checks if price reaches entry over next 5 bars
+        - Live bot scans at 22:15 UTC, then monitors entry levels every 15 min
         """
         log.info("=" * 70)
-        log.info("TRADR BOT - LIVE TRADING (FTMO COMPLIANT)")
+        log.info("TRADR BOT - LIVE TRADING (BACKTEST-MATCHED)")
         if CHALLENGE_MODE:
             log.info("*** CHALLENGE MODE: ELITE PROTECTION ENABLED ***")
         log.info("=" * 70)
         log.info(f"Using SAME strategy as backtests (strategy_core.py)")
+        log.info(f"")
+        log.info(f"⚡ BACKTEST-MATCHED EXECUTION:")
+        log.info(f"  - Daily scan at {self.DAILY_CLOSE_HOUR}:{self.DAILY_CLOSE_DELAY_MINUTES:02d} UTC (signals → watching)")
+        log.info(f"  - Entry check every {self.ENTRY_CHECK_INTERVAL_MINUTES} min (price touch → market order)")
+        log.info(f"  - Setup expiry: {self.SETUP_EXPIRY_DAYS} days (like backtest 5-bar wait)")
+        log.info(f"")
         log.info(f"FTMO Risk Limits:")
         log.info(f"  - Max single trade risk: 0.75% (Challenge Mode)")
         log.info(f"  - Max cumulative risk: {FIVEERS_CONFIG.max_cumulative_risk_pct}%")
         log.info(f"  - Emergency close at: 4.5% daily loss / 8% drawdown")
-        log.info(f"  - Partial TPs: 45% TP1, 30% TP2, 25% TP3 (Challenge Mode)")
         log.info(f"Server: {MT5_SERVER}")
         log.info(f"Login: {MT5_LOGIN}")
-        log.info(f"Daily Close Scan: {self.DAILY_CLOSE_HOUR}:{self.DAILY_CLOSE_DELAY_MINUTES:02d} UTC")
-        log.info(f"Spread Retry Interval: {self.SPREAD_CHECK_INTERVAL_MINUTES} minutes")
-        log.info(f"P/L Monitor Interval: {self.MAIN_LOOP_INTERVAL_SECONDS} seconds (elite protection)")
         log.info(f"Strategy Mode: {SIGNAL_MODE}")
         log.info(f"Min Confluence: {MIN_CONFLUENCE}/7")
         log.info(f"Symbols: {len(TRADABLE_SYMBOLS)}")
@@ -1949,6 +2246,7 @@ class LiveTradingBot:
             log.info(f"📅 Next daily scan at: {next_scan_time.strftime('%Y-%m-%d %H:%M')} UTC ({hours_until_scan:.1f}h)")
         
         self.last_validate_time = datetime.now(timezone.utc)
+        self.last_entry_check_time = datetime.now(timezone.utc)
         last_protection_check = datetime.now(timezone.utc)
         emergency_triggered = False
         
@@ -1985,13 +2283,20 @@ class LiveTradingBot:
                 self.check_pending_orders()
                 self.check_position_updates()
                 
-                # Validate existing setups and retry spread/volume checks every 10 min
+                # Check entry levels every 15 min (BACKTEST-MATCHED)
+                # This is where price touch → market order happens
+                if self.last_entry_check_time:
+                    next_entry_check = self.last_entry_check_time + timedelta(minutes=self.ENTRY_CHECK_INTERVAL_MINUTES)
+                    if now >= next_entry_check:
+                        self._check_entry_levels()
+                        self.last_entry_check_time = now
+                
+                # Validate existing filled setups every 10 min
                 if self.last_validate_time:
                     next_validate = self.last_validate_time + timedelta(minutes=self.VALIDATE_INTERVAL_MINUTES)
                     if now >= next_validate:
                         self.validate_all_setups()
-                        # Also retry entries for setups waiting on spread
-                        self._retry_pending_entries()
+                        self.last_validate_time = now
                 
                 # Daily close scan at 22:15 UTC (ONCE per day)
                 if self._is_daily_close_scan_time():
@@ -2023,6 +2328,7 @@ class LiveTradingBot:
         log.info("Shutting down...")
         
         self._save_pending_setups()
+        self._save_watching_setups()  # Save setups waiting for price touch
         self.disconnect()
         log.info("Bot stopped")
 
