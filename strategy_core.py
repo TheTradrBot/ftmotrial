@@ -125,19 +125,13 @@ class StrategyParams:
     atr_sl_multiplier: float = 1.5
     
     # ============================================================================
-    # TP R-MULTIPLES (Optimizer uses these - MUST match live bot!)
+    # TP R-MULTIPLES (Used by simulate_trades for TP level calculation)
     # ============================================================================
-    # These are the actual TP levels as R-multiples that the optimizer tunes.
-    # tp1_r_multiple=1.7 means TP1 is at 1.7R from entry.
-    tp1_r_multiple: float = 1.7  # TP1 at 1.7R (run009 optimized default)
-    tp2_r_multiple: float = 2.7  # TP2 at 2.7R (run009 optimized default)
-    tp3_r_multiple: float = 6.0  # TP3 at 6.0R (run009 optimized default)
-    
-    # Legacy ATR multipliers (kept for backward compatibility, deprecated)
-    # Use tp*_r_multiple instead - these are the same concept.
-    atr_tp1_multiplier: float = 1.7  # DEPRECATED: Use tp1_r_multiple
-    atr_tp2_multiplier: float = 2.7  # DEPRECATED: Use tp2_r_multiple
-    atr_tp3_multiplier: float = 6.0  # DEPRECATED: Use tp3_r_multiple
+    # These are the actual TP levels as R-multiples.
+    # Run009 backtest used these defaults and achieved Sharpe 2.92/4.76
+    atr_tp1_multiplier: float = 0.6  # TP1 at 0.6R (run009 backtest value)
+    atr_tp2_multiplier: float = 1.2  # TP2 at 1.2R (run009 backtest value)
+    atr_tp3_multiplier: float = 2.0  # TP3 at 2.0R (run009 backtest value)
     atr_tp4_multiplier: float = 3.0
     atr_tp5_multiplier: float = 4.0
     

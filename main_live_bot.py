@@ -152,12 +152,8 @@ log.info(f"Demo Mode: {'YES ⚠️' if IS_DEMO else 'NO (LIVE)'}")
 log.info(f"Account Size: ${ACCOUNT_SIZE:,.0f}")
 log.info(f"Risk per Trade: {FIVEERS_CONFIG.risk_per_trade_pct}% = ${ACCOUNT_SIZE * FIVEERS_CONFIG.risk_per_trade_pct / 100:.0f}")
 log.info(f"Tradable Symbols: {len(TRADABLE_SYMBOLS)}")
-log.info(f"")
-log.info(f"📊 OPTIMIZED PARAMS (from run009):")
-log.info(f"  Min Confluence: {MIN_CONFLUENCE}/7")
-log.info(f"  TP1: {FIVEERS_CONFIG.tp1_r_multiple}R ({FIVEERS_CONFIG.tp1_close_pct*100:.0f}% close)")
-log.info(f"  TP2: {FIVEERS_CONFIG.tp2_r_multiple:.1f}R ({FIVEERS_CONFIG.tp2_close_pct*100:.0f}% close)")
-log.info(f"  TP3: {FIVEERS_CONFIG.tp3_r_multiple}R ({FIVEERS_CONFIG.tp3_close_pct*100:.0f}% close)")
+log.info(f"Min Confluence: {MIN_CONFLUENCE}/7")
+log.info(f"(Full params loaded at bot initialization)")
 log.info("=" * 70)
 
 
@@ -1120,20 +1116,21 @@ class LiveTradingBot:
                 risk = abs(entry - sl)
                 log.info(f"[{symbol}] SL adjusted to {FIVEERS_CONFIG.min_sl_atr_ratio} ATR: {sl:.5f}")
             
-        # Calculate TPs using EXACT same R multiples as backtest (including TP4 and TP5)
+        # Calculate TPs using EXACT same R multiples as backtest (from StrategyParams)
+        # Run009 backtest used: TP1=0.6R, TP2=1.2R, TP3=2.0R
         risk = abs(entry - sl)
         if direction == "bullish":
-            tp1 = entry + (risk * FIVEERS_CONFIG.tp1_r_multiple)
-            tp2 = entry + (risk * FIVEERS_CONFIG.tp2_r_multiple)
-            tp3 = entry + (risk * FIVEERS_CONFIG.tp3_r_multiple)
-            tp4 = entry + (risk * FIVEERS_CONFIG.tp4_r_multiple)
-            tp5 = entry + (risk * FIVEERS_CONFIG.tp5_r_multiple)
+            tp1 = entry + (risk * self.params.atr_tp1_multiplier)
+            tp2 = entry + (risk * self.params.atr_tp2_multiplier)
+            tp3 = entry + (risk * self.params.atr_tp3_multiplier)
+            tp4 = entry + (risk * self.params.atr_tp4_multiplier)
+            tp5 = entry + (risk * self.params.atr_tp5_multiplier)
         else:
-            tp1 = entry - (risk * FIVEERS_CONFIG.tp1_r_multiple)
-            tp2 = entry - (risk * FIVEERS_CONFIG.tp2_r_multiple)
-            tp3 = entry - (risk * FIVEERS_CONFIG.tp3_r_multiple)
-            tp4 = entry - (risk * FIVEERS_CONFIG.tp4_r_multiple)
-            tp5 = entry - (risk * FIVEERS_CONFIG.tp5_r_multiple)
+            tp1 = entry - (risk * self.params.atr_tp1_multiplier)
+            tp2 = entry - (risk * self.params.atr_tp2_multiplier)
+            tp3 = entry - (risk * self.params.atr_tp3_multiplier)
+            tp4 = entry - (risk * self.params.atr_tp4_multiplier)
+            tp5 = entry - (risk * self.params.atr_tp5_multiplier)
         
         if direction == "bullish":
             if current_price <= sl:
@@ -1150,11 +1147,11 @@ class LiveTradingBot:
         log.info(f"  Current Price: {current_price:.5f}")
         log.info(f"  Entry: {entry:.5f} ({entry_distance_r:.2f}R away)")
         log.info(f"  SL: {sl:.5f} ({sl_pips:.1f} pips)")
-        log.info(f"  TP1: {tp1:.5f} ({FIVEERS_CONFIG.tp1_r_multiple}R)")
-        log.info(f"  TP2: {tp2:.5f} ({FIVEERS_CONFIG.tp2_r_multiple}R)")
-        log.info(f"  TP3: {tp3:.5f} ({FIVEERS_CONFIG.tp3_r_multiple}R)")
-        log.info(f"  TP4: {tp4:.5f} ({FIVEERS_CONFIG.tp4_r_multiple}R)")
-        log.info(f"  TP5: {tp5:.5f} ({FIVEERS_CONFIG.tp5_r_multiple}R)")
+        log.info(f"  TP1: {tp1:.5f} ({self.params.atr_tp1_multiplier}R)")
+        log.info(f"  TP2: {tp2:.5f} ({self.params.atr_tp2_multiplier}R)")
+        log.info(f"  TP3: {tp3:.5f} ({self.params.atr_tp3_multiplier}R)")
+        log.info(f"  TP4: {tp4:.5f} ({self.params.atr_tp4_multiplier}R)")
+        log.info(f"  TP5: {tp5:.5f} ({self.params.atr_tp5_multiplier}R)")
         
         return {
             "symbol": symbol,

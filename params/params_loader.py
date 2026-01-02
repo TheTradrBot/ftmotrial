@@ -70,9 +70,10 @@ def load_strategy_params():
         min_confluence=data.get("min_confluence", 5),
         min_quality_factors=data.get("min_quality_factors", 3),
         atr_sl_multiplier=data.get("atr_sl_multiplier", 1.5),
-        atr_tp1_multiplier=data.get("atr_tp1_multiplier", 0.6),
-        atr_tp2_multiplier=data.get("atr_tp2_multiplier", 1.2),
-        atr_tp3_multiplier=data.get("atr_tp3_multiplier", 2.0),
+        # Map tp*_r_multiple from JSON to atr_tp*_multiplier in StrategyParams
+        atr_tp1_multiplier=data.get("tp1_r_multiple", data.get("atr_tp1_multiplier", 0.6)),
+        atr_tp2_multiplier=data.get("tp2_r_multiple", data.get("atr_tp2_multiplier", 1.2)),
+        atr_tp3_multiplier=data.get("tp3_r_multiple", data.get("atr_tp3_multiplier", 2.0)),
         atr_tp4_multiplier=data.get("atr_tp4_multiplier", 3.0),
         atr_tp5_multiplier=data.get("atr_tp5_multiplier", 4.0),
         fib_low=data.get("fib_low", 0.382),

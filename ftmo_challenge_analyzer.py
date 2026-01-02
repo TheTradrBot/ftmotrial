@@ -1168,12 +1168,10 @@ def run_full_period_backtest(
                 adx_range_threshold=adx_range_threshold,
                 use_adx_regime_filter=use_adx_regime_filter,
                 # ============================================================================
-                # CRITICAL: TP R-multiples - MUST be passed to match live bot!
+                # TP R-multiples - passed to simulate_trades() via atr_tp*_multiplier
+                # Run009 used defaults (0.6, 1.2, 2.0) - optimizer's tp*_r_multiple values
+                # are passed here to allow future optimization of TP levels
                 # ============================================================================
-                tp1_r_multiple=tp1_r_multiple,
-                tp2_r_multiple=tp2_r_multiple,
-                tp3_r_multiple=tp3_r_multiple,
-                # Also update legacy atr_tp*_multiplier to same values for compatibility
                 atr_tp1_multiplier=tp1_r_multiple,
                 atr_tp2_multiplier=tp2_r_multiple,
                 atr_tp3_multiplier=tp3_r_multiple,
