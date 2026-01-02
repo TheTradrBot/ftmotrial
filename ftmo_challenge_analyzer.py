@@ -216,8 +216,6 @@ RUN_006_PARAMS = {
     'tp1_close_pct': 0.38,
     'tp2_close_pct': 0.16,
     'tp3_close_pct': 0.30,
-    'partial_exit_at_1r': True,
-    'partial_exit_pct': 0.70,
     'december_atr_multiplier': 1.65,
     'volatile_asset_boost': 1.35,
     'daily_loss_halt_pct': 3.8,
@@ -253,8 +251,6 @@ WARM_START_SEARCH_SPACE = {
     'tp1_close_pct': (0.20, 0.60, 0.05),             # LOCO: 20% to 60% (was 34-42%)
     'tp2_close_pct': (0.10, 0.40, 0.05),             # LOCO: 10% to 40% (was 12-20%)
     'tp3_close_pct': (0.10, 0.50, 0.05),             # LOCO: 10% to 50% (was 25-35%)
-    'partial_exit_at_1r': [True, False],             # LOCO: both options
-    'partial_exit_pct': (0.40, 0.90, 0.10),          # LOCO: 40% to 90% (was 60-80%)
     'december_atr_multiplier': (1.0, 2.5, 0.1),      # LOCO: 1.0 to 2.5 (was 1.5-1.8)
     'volatile_asset_boost': (1.0, 2.0, 0.1),         # LOCO: 1.0 to 2.0 (was 1.2-1.5)
     'daily_loss_halt_pct': (2.5, 4.8, 0.1),          # LOCO: 2.5 to 4.8 (was 3.5-4.2)
@@ -1037,8 +1033,6 @@ def run_full_period_backtest(
     rsi_overbought_range: float = 75.0,  # RSI threshold for range shorts
     atr_volatility_ratio: float = 0.8,  # ATR(14)/ATR(50) ratio for range mode
     atr_trail_multiplier: float = 1.5,  # ATR multiplier for trailing stops
-    partial_exit_at_1r: bool = True,  # Whether to take profit at 1R
-    partial_exit_pct: float = 0.5,  # % to close at 1R
     use_adx_slope_rising: bool = False,  # Enable ADX slope rising early trend detection
     atr_vol_ratio_range: float = 0.8,  # ATR volatility ratio for range mode filter
     # ============================================================================
@@ -1188,8 +1182,6 @@ def run_full_period_backtest(
                 use_candle_rejection=use_candle_rejection,
                 # ATR and trail
                 atr_trail_multiplier=atr_trail_multiplier,
-                partial_exit_at_1r=partial_exit_at_1r,
-                partial_exit_pct=partial_exit_pct,
                 # NEW: Session filter & graduated risk
                 use_session_filter=use_session_filter,
                 session_start_utc=session_start_utc,
@@ -1557,7 +1549,6 @@ class OptunaOptimizer:
             tp1c_low, tp1c_high, tp1c_step = WARM_START_SEARCH_SPACE['tp1_close_pct']
             tp2c_low, tp2c_high, tp2c_step = WARM_START_SEARCH_SPACE['tp2_close_pct']
             tp3c_low, tp3c_high, tp3c_step = WARM_START_SEARCH_SPACE['tp3_close_pct']
-            pexit_low, pexit_high, pexit_step = WARM_START_SEARCH_SPACE['partial_exit_pct']
             decatr_low, decatr_high, decatr_step = WARM_START_SEARCH_SPACE['december_atr_multiplier']
             vab_low, vab_high, vab_step = WARM_START_SEARCH_SPACE['volatile_asset_boost']
             dlh_low, dlh_high, dlh_step = WARM_START_SEARCH_SPACE['daily_loss_halt_pct']
@@ -1575,8 +1566,6 @@ class OptunaOptimizer:
                 'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', atrvr_low, atrvr_high, step=atrvr_step),
                 'atr_min_percentile': trial.suggest_float('atr_min_percentile', atrmp_low, atrmp_high, step=atrmp_step),
                 'trail_activation_r': trial.suggest_float('trail_activation_r', tar_low, tar_high, step=tar_step),
-                'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', WARM_START_SEARCH_SPACE['partial_exit_at_1r']),
-                'partial_exit_pct': trial.suggest_float('partial_exit_pct', pexit_low, pexit_high, step=pexit_step),
                 'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', decatr_low, decatr_high, step=decatr_step),
                 'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', vab_low, vab_high, step=vab_step),
                 'tp1_r_multiple': trial.suggest_float('tp1_r_multiple', tp1_low, tp1_high, step=tp1_step),
@@ -1608,8 +1597,6 @@ class OptunaOptimizer:
                 'atr_vol_ratio_range': trial.suggest_float('atr_vol_ratio_range', 0.5, 1.0, step=0.05),
                 'atr_min_percentile': trial.suggest_float('atr_min_percentile', 30.0, 70.0, step=5.0),
                 'trail_activation_r': trial.suggest_float('trail_activation_r', 1.0, 3.0, step=0.2),
-                'partial_exit_at_1r': trial.suggest_categorical('partial_exit_at_1r', [True, False]),
-                'partial_exit_pct': trial.suggest_float('partial_exit_pct', 0.3, 0.8, step=0.05),
                 'december_atr_multiplier': trial.suggest_float('december_atr_multiplier', 1.0, 2.0, step=0.1),
                 'volatile_asset_boost': trial.suggest_float('volatile_asset_boost', 1.0, 2.0, step=0.1),
                 'tp1_r_multiple': trial.suggest_float('tp1_r_multiple', 1.0, 2.0, step=0.25),
@@ -1676,8 +1663,6 @@ class OptunaOptimizer:
             atr_volatility_ratio=params['atr_vol_ratio_range'],
             atr_vol_ratio_range=params['atr_vol_ratio_range'],
             atr_trail_multiplier=params['atr_trail_multiplier'],
-            partial_exit_at_1r=params['partial_exit_at_1r'],
-            partial_exit_pct=params['partial_exit_pct'],
             # NEW: TP parameters
             tp1_r_multiple=params['tp1_r_multiple'],
             tp2_r_multiple=params['tp2_r_multiple'],

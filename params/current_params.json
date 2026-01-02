@@ -15,8 +15,6 @@
     "atr_vol_ratio_range": 0.9,
     "atr_min_percentile": 42.0,
     "trail_activation_r": 0.65,
-    "partial_exit_at_1r": true,
-    "partial_exit_pct": 0.75,
     "december_atr_multiplier": 1.7,
     "volatile_asset_boost": 1.35,
     "tp1_r_multiple": 0.6,

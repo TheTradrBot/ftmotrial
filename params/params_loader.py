@@ -108,8 +108,6 @@ def load_strategy_params():
         trend_min_confluence=data.get("trend_min_confluence", 4),
         range_min_confluence=data.get("range_min_confluence", 3),
         atr_volatility_ratio=data.get("atr_volatility_ratio", 0.8),
-        partial_exit_at_1r=data.get("partial_exit_at_1r", True),
-        partial_exit_pct=data.get("partial_exit_pct", 0.5),
         atr_trail_multiplier=data.get("atr_trail_multiplier", 1.5),
         trail_activation_r=data.get("trail_activation_r", 2.2),
         december_atr_multiplier=data.get("december_atr_multiplier", 1.5),

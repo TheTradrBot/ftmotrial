@@ -212,9 +212,7 @@ class StrategyParams:
     # Trend Mode Parameters
     trend_min_confluence: int = 4  # OPTIMIZED: Keep at 4 for trend mode (2-3x more trades than 6/7 requirement)
     
-    # Partial Profit Taking and Trail Management
-    partial_exit_at_1r: bool = True  # Take partial profit at 1R
-    partial_exit_pct: float = 0.50  # Percentage to close at 1R (50%)
+    # Trail Management
     atr_trail_multiplier: float = 1.5  # ATR multiplier for trailing stop distance
     
     # ============================================================================
@@ -308,8 +306,6 @@ class StrategyParams:
             "atr_volatility_ratio": self.atr_volatility_ratio,
             "fib_range_target": self.fib_range_target,
             "trend_min_confluence": self.trend_min_confluence,
-            "partial_exit_at_1r": self.partial_exit_at_1r,
-            "partial_exit_pct": self.partial_exit_pct,
             "atr_trail_multiplier": self.atr_trail_multiplier,
             # REGIME-ADAPTIVE V2 ENHANCED PARAMETERS
             "use_adx_regime_filter": self.use_adx_regime_filter,
