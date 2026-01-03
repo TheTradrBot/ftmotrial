@@ -2,42 +2,43 @@
 
 This directory contains all optimization and validation results organized by mode.
 
-## Directory Overview
+## 🏗️ Directory Overview
 
 ```
 ftmo_analysis_output/
 ├── TPE/                    # TPE (single-objective) optimization results
 │   ├── history/
-│   │   ├── run_001/
-│   │   ├── run_002/
-│   │   └── run_XXX/
+│   ├── best_params.json    ← Source for production deployment
 │   ├── best_trades_*.csv
-│   ├── best_params.json
+│   ├── professional_backtest_report.txt
 │   └── optimization.log
 │
 ├── NSGA/                   # NSGA-II (multi-objective) optimization results
 │   ├── history/
-│   │   ├── run_001/
-│   │   ├── run_002/
-│   │   └── run_XXX/
-│   ├── best_trades_*.csv
 │   ├── best_params.json
 │   └── optimization.log
 │
 ├── VALIDATE/               # TPE parameter validation on different periods
-│   ├── history/
-│   │   ├── val_2014_2016_001/
-│   │   ├── val_2017_2019_001/
-│   │   └── val_YYYY_YYYY_XXX/
-│   └── best_trades_*.csv
+│   └── history/
 │
-└── VALIDATE_NSGA/          # NSGA-II parameter validation on different periods
-    ├── history/
-    │   ├── val_2014_2016_001/
-    │   ├── val_2017_2019_001/
-    │   └── val_YYYY_YYYY_XXX/
-    └── best_trades_*.csv
+└── VALIDATE_NSGA/          # NSGA-II parameter validation
+    └── history/
 ```
+
+## 🔐 Production Deployment
+
+After optimization, promote best params to production:
+
+```bash
+# Promote TPE results to production
+python -m params.promote_to_production --source TPE
+
+# Or promote NSGA results
+python -m params.promote_to_production --source NSGA
+```
+
+The `best_params.json` in each directory is the **source** for production deployment.
+The actual production parameters are stored in `params/PRODUCTION_PARAMS.json`.
 
 ## Usage by Mode
 

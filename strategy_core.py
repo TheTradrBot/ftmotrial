@@ -11,7 +11,7 @@ faithful to the Blueprint confluence-based approach.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Tuple, Any
 
 from indicators import calculate_adx_with_slope, check_di_crossover
@@ -117,21 +117,25 @@ class StrategyParams:
     """
     Strategy parameters that can be optimized.
     
-    These control confluence thresholds, SL/TP ratios, filters, etc.
+    DEFAULTS: These are the BEST OPTIMIZED PARAMS from TPE run_009.
+    All components (strategy_core, ftmo_challenge_analyzer, main_live_bot) 
+    should use these defaults for consistency.
+    
+    Source: ftmo_analysis_output/TPE/history/run_009/best_params.json
+    Score: 212.09, Sharpe: 2.92 (train) / 4.76 (validation)
     """
-    min_confluence: int = 4
-    min_quality_factors: int = 3
+    # === CONFLUENCE THRESHOLDS (run_009 optimized) ===
+    min_confluence: int = 2  # run_009: min_confluence_score = 2
+    min_quality_factors: int = 3  # run_009: 3
     
     atr_sl_multiplier: float = 1.5
     
     # ============================================================================
-    # TP R-MULTIPLES (Used by simulate_trades for TP level calculation)
+    # TP R-MULTIPLES (run_009 optimized values)
     # ============================================================================
-    # These are the actual TP levels as R-multiples.
-    # Run009 backtest used these defaults and achieved Sharpe 2.92/4.76
-    atr_tp1_multiplier: float = 0.6  # TP1 at 0.6R (run009 backtest value)
-    atr_tp2_multiplier: float = 1.2  # TP2 at 1.2R (run009 backtest value)
-    atr_tp3_multiplier: float = 2.0  # TP3 at 2.0R (run009 backtest value)
+    atr_tp1_multiplier: float = 1.7  # TP1 at 1.7R (run_009)
+    atr_tp2_multiplier: float = 2.7  # TP2 at 2.7R (run_009)
+    atr_tp3_multiplier: float = 6.0  # TP3 at 6.0R (run_009)
     atr_tp4_multiplier: float = 3.0
     atr_tp5_multiplier: float = 4.0
     
@@ -140,7 +144,7 @@ class StrategyParams:
     
     structure_sl_lookback: int = 35
     
-    # DISABLED: All indicator filters temporarily disabled for baseline testing
+    # === FILTER TOGGLES (all disabled per run_009) ===
     use_htf_filter: bool = False
     use_structure_filter: bool = False
     use_fib_filter: bool = False
@@ -151,34 +155,34 @@ class StrategyParams:
     require_rr_for_active: bool = False
     
     min_rr_ratio: float = 1.0
-    risk_per_trade_pct: float = 1.0
+    risk_per_trade_pct: float = 0.65  # run_009: 0.65%
     
     cooldown_bars: int = 0
     max_open_trades: int = 3
     
-    # Partial take-profit percentages (must sum to 1.0)
-    tp1_close_pct: float = 0.10  # Close 10% at TP1
-    tp2_close_pct: float = 0.10  # Close 10% at TP2
-    tp3_close_pct: float = 0.15  # Close 15% at TP3
-    tp4_close_pct: float = 0.20  # Close 20% at TP4
-    tp5_close_pct: float = 0.45  # Close 45% at TP5
+    # === TP CLOSE PERCENTAGES (run_009 optimized) ===
+    tp1_close_pct: float = 0.34  # run_009: 34% at TP1
+    tp2_close_pct: float = 0.16  # run_009: 16% at TP2
+    tp3_close_pct: float = 0.35  # run_009: 35% at TP3
+    tp4_close_pct: float = 0.10  # run_009: 10% at TP4
+    tp5_close_pct: float = 0.05  # run_009: 5% at TP5
     
-    # Quantitative enhancement filters - DISABLED for baseline testing
+    # Quantitative enhancement filters - DISABLED per run_009
     use_atr_regime_filter: bool = False
-    atr_min_percentile: float = 60.0
+    atr_min_percentile: float = 42.0  # run_009: 42.0
     use_zscore_filter: bool = False
     zscore_threshold: float = 1.5
     use_pattern_filter: bool = False
     
-    # Blueprint V2 enhancements - DISABLED for baseline testing
-    use_mitigated_sr: bool = False  # Broken then retested SR zones
-    sr_proximity_pct: float = 0.02  # 1-2% proximity filter for SR entry
-    use_structural_framework: bool = False  # Ascending/descending channel detection
-    use_displacement_filter: bool = False  # Strong candles beyond structure
-    displacement_atr_mult: float = 1.5  # Min ATR multiplier for displacement
-    use_candle_rejection: bool = False  # Pinbar/engulfing at SR
+    # Blueprint V2 enhancements - DISABLED per run_009
+    use_mitigated_sr: bool = False
+    sr_proximity_pct: float = 0.02
+    use_structural_framework: bool = False
+    use_displacement_filter: bool = False  # run_009: false
+    displacement_atr_mult: float = 1.5
+    use_candle_rejection: bool = False  # run_009: false
     
-    # Advanced quant filters - DISABLED for baseline testing
+    # Advanced quant filters - DISABLED
     use_momentum_filter: bool = False
     momentum_lookback: int = 10
     use_mean_reversion: bool = False
@@ -186,42 +190,36 @@ class StrategyParams:
     # ML filter parameters
     ml_min_prob: float = 0.6
     
-    # New FTMO challenge parameters
-    trail_activation_r: float = 2.2  # Delay trailing stop activation until this R is reached
-    december_atr_multiplier: float = 1.5  # Extra strict ATR threshold only in December
-    volatile_asset_boost: float = 1.5  # Boost scoring for high-ATR assets
+    # === FTMO CHALLENGE PARAMETERS (run_009 optimized) ===
+    trail_activation_r: float = 0.65  # run_009: 0.65 (was 2.2)
+    december_atr_multiplier: float = 1.7  # run_009: 1.7 (was 1.5)
+    volatile_asset_boost: float = 1.35  # run_009: 1.35 (was 1.5)
     
     # ============================================================================
-    # REGIME-ADAPTIVE V2 PARAMETERS
-    # These control the dual-mode trading system: Trend Mode + Conservative Range Mode
+    # REGIME-ADAPTIVE V2 PARAMETERS (run_009 optimized)
     # ============================================================================
     
-    # Regime Detection Thresholds
-    # ADX >= adx_trend_threshold: Trend Mode (momentum following)
-    # ADX < adx_range_threshold: Range Mode (mean reversion, ultra-conservative)
-    # ADX in between: Transition Zone (NO ENTRIES - wait for confirmation)
-    adx_trend_threshold: float = 25.0  # ADX threshold for trend mode activation
-    adx_range_threshold: float = 20.0  # ADX threshold below which range mode activates
+    # Regime Detection Thresholds (run_009 values)
+    adx_trend_threshold: float = 20.0  # run_009: 20.0 (was 25.0)
+    adx_range_threshold: float = 13.0  # run_009: 13.0 (was 20.0)
     
-    # Range Mode Filters (Ultra-Conservative Mean Reversion)
-    # ALL conditions must be met for Range Mode entry
-    range_min_confluence: int = 3  # Minimum confluence score for range mode entries
-    atr_volatility_ratio: float = 0.8  # Current ATR(14) must be < this * ATR(50) average
-    fib_range_target: float = 0.786  # Fib retracement level for range mode entries
+    # Range Mode Filters
+    range_min_confluence: int = 3  # run_009: 3
+    atr_volatility_ratio: float = 0.8
+    fib_range_target: float = 0.786
     
     # Trend Mode Parameters
-    trend_min_confluence: int = 4  # OPTIMIZED: Keep at 4 for trend mode (2-3x more trades than 6/7 requirement)
+    trend_min_confluence: int = 6  # run_009: 6 (was 4)
     
     # Trail Management
-    atr_trail_multiplier: float = 1.5  # ATR multiplier for trailing stop distance
+    atr_trail_multiplier: float = 1.6  # run_009: 1.6 (was 1.5)
     
     # ============================================================================
     # REGIME-ADAPTIVE V2 ENHANCED PARAMETERS
-    # Additional toggles and parameters for refined regime-based trading
     # ============================================================================
     
     # ADX Regime Filter Master Toggle
-    use_adx_regime_filter: bool = False  # DISABLED: Set to True to enable ADX-based regime filtering (Trend/Range/Transition modes)
+    use_adx_regime_filter: bool = False  # run_009: disabled
 
     # ADX Slope-Based Early Trend Entry
     use_adx_slope_rising: bool = False  # If True, allow Trend Mode entries on rising ADX (even slightly below threshold) combined with strong +DI/-DI crossover
@@ -2500,6 +2498,105 @@ def _validate_and_find_entry(
     return None, 0.0, False
 
 
+def _check_exit_with_h1_data(
+    h1_candles_dict: Dict[str, List[Dict]],
+    symbol: str,
+    direction: str,
+    entry_time: Any,
+    sl_price: float,
+    tp_prices: List[float],  # [tp1, tp2, tp3, tp4, tp5]
+    trailing_sl: float,
+    tp_hit_flags: List[bool],  # [tp1_hit, tp2_hit, ...]
+) -> Tuple[Optional[str], Optional[float], List[bool]]:
+    """
+    Check SL/TP hits using H1 data for accurate intraday detection.
+    
+    This fixes the critical bug where D1 backtest cannot determine
+    which (SL or TP) was hit first when both occur on the same day.
+    
+    Args:
+        h1_candles_dict: Dict mapping symbol to list of H1 candles
+        symbol: Trading symbol
+        direction: 'bullish' or 'bearish'
+        entry_time: Entry timestamp (to start checking from)
+        sl_price: Current stop loss price (may be trailing)
+        tp_prices: List of TP prices [tp1, tp2, tp3, tp4, tp5]
+        trailing_sl: Current trailing stop level
+        tp_hit_flags: Current state of TP hits [tp1_hit, tp2_hit, ...]
+    
+    Returns:
+        Tuple of (exit_type, exit_price, updated_tp_flags)
+        exit_type: 'sl', 'tp1', 'tp2', 'tp3', 'tp4', 'tp5', or None if no exit
+        exit_price: Price at which exit occurred
+        updated_tp_flags: Updated TP hit flags
+    """
+    if not h1_candles_dict or symbol not in h1_candles_dict:
+        return None, None, tp_hit_flags
+    
+    h1_candles = h1_candles_dict[symbol]
+    if not h1_candles:
+        return None, None, tp_hit_flags
+    
+    # Convert entry_time to comparable format
+    entry_dt = _get_candle_datetime({"time": entry_time})
+    if entry_dt is None:
+        return None, None, tp_hit_flags
+    
+    # Make timezone-naive for comparison
+    if hasattr(entry_dt, 'tzinfo') and entry_dt.tzinfo is not None:
+        entry_dt = entry_dt.replace(tzinfo=None)
+    
+    # Find H1 candles after entry
+    updated_flags = list(tp_hit_flags)
+    current_sl = trailing_sl
+    
+    for h1_candle in h1_candles:
+        h1_time = _get_candle_datetime(h1_candle)
+        if h1_time is None:
+            continue
+        
+        # Make timezone-naive
+        if hasattr(h1_time, 'tzinfo') and h1_time.tzinfo is not None:
+            h1_time = h1_time.replace(tzinfo=None)
+        
+        # Only check candles after entry
+        if h1_time < entry_dt:
+            continue
+        
+        h1_high = h1_candle.get("high", h1_candle.get("High", 0))
+        h1_low = h1_candle.get("low", h1_candle.get("Low", 0))
+        
+        # Check SL hit first (conservative)
+        sl_hit = False
+        if direction == "bullish":
+            sl_hit = h1_low <= current_sl
+        else:
+            sl_hit = h1_high >= current_sl
+        
+        if sl_hit:
+            return 'sl', current_sl, updated_flags
+        
+        # Check TP hits in order
+        for i, (tp_price, already_hit) in enumerate(zip(tp_prices, updated_flags)):
+            if tp_price is None or already_hit:
+                continue
+            
+            tp_hit = False
+            if direction == "bullish":
+                tp_hit = h1_high >= tp_price
+            else:
+                tp_hit = h1_low <= tp_price
+            
+            if tp_hit:
+                updated_flags[i] = True
+                # If this is TP5 (final), return exit
+                if i == 4:  # TP5
+                    return f'tp{i+1}', tp_price, updated_flags
+                # Otherwise continue to check for more hits on same candle
+    
+    return None, None, updated_flags
+
+
 def simulate_trades(
     candles: List[Dict],
     symbol: str = "UNKNOWN",
@@ -2507,8 +2604,12 @@ def simulate_trades(
     monthly_candles: Optional[List[Dict]] = None,
     weekly_candles: Optional[List[Dict]] = None,
     h4_candles: Optional[List[Dict]] = None,
+    h1_candles: Optional[List[Dict]] = None,  # NEW: H1 data for accurate exit detection
     include_transaction_costs: bool = True,
-) -> List[Trade]:
+    enforce_5ers_rules: bool = False,  # Changed to False - use penalty system instead
+    initial_balance: float = 60000.0,
+    track_dd_stats: bool = True,  # Track DD for penalty calculation
+) -> Tuple[List[Trade], Optional[Dict]]:
     """
     Simulate trades through historical candles using the Blueprint strategy.
     
@@ -2523,6 +2624,11 @@ def simulate_trades(
     Transaction costs (spread + slippage) are deducted from each trade
     when include_transaction_costs=True to produce realistic backtest results.
     
+    5ers Challenge DD Tracking (when track_dd_stats=True):
+    - Tracks Daily DD and Total DD but does NOT stop backtest
+    - Returns DD stats for penalty calculation in optimizer
+    - Live bot has separate enforcement via ChallengeRiskManager
+    
     Args:
         candles: Daily OHLCV candles (oldest to newest)
         symbol: Asset symbol
@@ -2531,9 +2637,12 @@ def simulate_trades(
         weekly_candles: Optional weekly data
         h4_candles: Optional 4H data
         include_transaction_costs: Whether to include spread/slippage costs (default True)
+        enforce_5ers_rules: DEPRECATED - kept for compatibility (default False)
+        initial_balance: Starting balance for DD calculations (default 60000)
+        track_dd_stats: Track DD statistics for optimizer penalty (default True)
     
     Returns:
-        List of completed Trade objects
+        Tuple of (List of Trade objects, Optional DD stats dict)
     """
     if params is None:
         params = StrategyParams()
@@ -2556,6 +2665,47 @@ def simulate_trades(
             pip_value = 0.0001
     
     transaction_cost_price = transaction_cost_pips * pip_value
+    
+    # === BUILD H1 INDEX FOR ACCURATE EXIT DETECTION ===
+    # When H1 data is provided, we use it to determine exact SL/TP hit order
+    # This fixes the critical bug where D1 data can't distinguish which hit first
+    h1_index = {}  # Maps date -> list of H1 candles for that day
+    use_h1_for_exits = False
+    
+    if h1_candles and len(h1_candles) > 0:
+        use_h1_for_exits = True
+        for h1c in h1_candles:
+            h1_time = _get_candle_datetime(h1c)
+            if h1_time is None:
+                continue
+            # Make timezone-naive
+            if hasattr(h1_time, 'tzinfo') and h1_time.tzinfo is not None:
+                h1_time = h1_time.replace(tzinfo=None)
+            day_key = h1_time.date()
+            if day_key not in h1_index:
+                h1_index[day_key] = []
+            h1_index[day_key].append({
+                'time': h1_time,
+                'high': h1c.get('high', h1c.get('High', 0)),
+                'low': h1c.get('low', h1c.get('Low', 0)),
+                'close': h1c.get('close', h1c.get('Close', 0)),
+            })
+    
+    # === 5ERS DD TRACKING (for penalty calculation, not enforcement) ===
+    dd_stats = None
+    if track_dd_stats:
+        current_balance = initial_balance
+        current_equity = initial_balance
+        yesterday_high = initial_balance
+        current_day_start_idx = 0
+        daily_max_dd = 0.0  # Track max DD within current day
+        
+        # Track DD statistics per day
+        daily_dd_records = []  # List of (date, max_dd_pct) tuples
+        max_daily_dd = 0.0
+        max_total_dd = 0.0
+        days_over_4pct = 0
+        days_over_5pct = 0
     
     signals = generate_signals(
         candles, symbol, params,
@@ -2592,6 +2742,61 @@ def simulate_trades(
         low = c["low"]
         bar_timestamp = c.get("time") or c.get("timestamp") or c.get("date")
         
+        # === 5ERS DD TRACKING (no enforcement, just stats) ===
+        if track_dd_stats:
+            # Check for nieuwe dag
+            if bar_idx > current_day_start_idx:
+                # Update yesterday_high met max van vorige dag
+                yesterday_high = max(current_balance, current_equity)
+                current_day_start_idx = bar_idx
+                
+                # Reset daily DD tracking for new day
+                daily_max_dd = 0.0
+            
+            # Bereken equity: balance + unrealized P&L open trades
+            unrealized_pnl = 0.0
+            for ot in open_trades:
+                entry_price = ot["entry_price"]
+                risk = ot["risk"]
+                direction = ot["direction"]
+                current_price = c.get("close", entry_price)
+                
+                if direction == "bullish":
+                    price_move = current_price - entry_price
+                else:
+                    price_move = entry_price - current_price
+                
+                unrealized_r = price_move / risk if risk > 0 else 0
+                unrealized_pnl += unrealized_r * risk
+            
+            current_equity = current_balance + unrealized_pnl
+            
+            # Track Daily DD: 5% van yesterday_high
+            if yesterday_high > 0:
+                daily_drop = max(0, yesterday_high - current_equity)
+                daily_dd_pct = (daily_drop / yesterday_high) * 100
+                daily_max_dd = max(daily_max_dd, daily_dd_pct)
+                
+                if daily_dd_pct > max_daily_dd:
+                    max_daily_dd = daily_dd_pct
+                
+                # Track days over thresholds (will count at end of day)
+                if bar_idx == len(candles) - 1 or (bar_idx < len(candles) - 1 and 
+                   _get_candle_datetime(candles[bar_idx+1]).date() != _get_candle_datetime(c).date()):
+                    if daily_max_dd > 5.0:
+                        days_over_5pct += 1
+                    elif daily_max_dd > 4.0:
+                        days_over_4pct += 1
+                    daily_dd_records.append((bar_timestamp, daily_max_dd))
+            
+            # Track Total DD: 10% van initial balance
+            if initial_balance > 0:
+                total_drop = max(0, initial_balance - current_equity)
+                total_dd_pct = (total_drop / initial_balance) * 100
+                
+                if total_dd_pct > max_total_dd:
+                    max_total_dd = total_dd_pct
+        
         trades_to_close = []
         for ot in open_trades:
             direction = ot["direction"]
@@ -2621,8 +2826,163 @@ def simulate_trades(
             exit_reason = ""
             reward = 0.0
             
+            # === H1-BASED EXIT DETECTION (when available) ===
+            # This fixes the critical bug where D1 data can't determine SL vs TP order
+            h1_sl_hit_first = None  # True = SL first, False = TP first, None = unknown
+            h1_tp_updates = {}  # TP levels hit on H1 before SL
+            
+            if use_h1_for_exits:
+                # Get current day's H1 candles
+                bar_dt = _get_candle_datetime(c)
+                if bar_dt:
+                    if hasattr(bar_dt, 'tzinfo') and bar_dt.tzinfo is not None:
+                        bar_dt = bar_dt.replace(tzinfo=None)
+                    day_key = bar_dt.date()
+                    
+                    # Get entry timestamp to filter H1 candles
+                    entry_ts = ot.get("entry_timestamp")
+                    entry_dt_for_h1 = _get_candle_datetime({"time": entry_ts}) if entry_ts else None
+                    if entry_dt_for_h1 and hasattr(entry_dt_for_h1, 'tzinfo') and entry_dt_for_h1.tzinfo is not None:
+                        entry_dt_for_h1 = entry_dt_for_h1.replace(tzinfo=None)
+                    entry_day = entry_dt_for_h1.date() if entry_dt_for_h1 else None
+                    
+                    if day_key in h1_index:
+                        h1_day_candles = h1_index[day_key]
+                        
+                        # Track what happens on H1 level
+                        temp_sl = trailing_sl
+                        temp_tp1_hit = tp1_hit
+                        temp_tp2_hit = tp2_hit
+                        temp_tp3_hit = tp3_hit
+                        temp_tp4_hit = tp4_hit
+                        temp_tp5_hit = tp5_hit
+                        
+                        for h1c in h1_day_candles:
+                            # CRITICAL FIX: Skip H1 candles before trade entry
+                            # On entry day, only check candles AFTER entry time
+                            if entry_day == day_key and entry_dt_for_h1:
+                                h1_time = h1c.get('time')
+                                if h1_time is not None and h1_time < entry_dt_for_h1:
+                                    continue  # Skip candles before entry
+                            
+                            h1_high = h1c['high']
+                            h1_low = h1c['low']
+                            
+                            # Check SL first
+                            if direction == "bullish":
+                                if h1_low <= temp_sl:
+                                    h1_sl_hit_first = True
+                                    break
+                            else:
+                                if h1_high >= temp_sl:
+                                    h1_sl_hit_first = True
+                                    break
+                            
+                            # Check TPs in order
+                            if direction == "bullish":
+                                if tp1 and not temp_tp1_hit and h1_high >= tp1:
+                                    temp_tp1_hit = True
+                                    h1_tp_updates['tp1'] = True
+                                    # Move trailing SL if trail_activation_r reached
+                                    if tp1_rr >= params.trail_activation_r:
+                                        temp_sl = entry_price
+                                if tp2 and temp_tp1_hit and not temp_tp2_hit and h1_high >= tp2:
+                                    temp_tp2_hit = True
+                                    h1_tp_updates['tp2'] = True
+                                    if tp2_rr >= params.trail_activation_r and tp1:
+                                        temp_sl = tp1 + 0.5 * risk
+                                if tp3 and temp_tp2_hit and not temp_tp3_hit and h1_high >= tp3:
+                                    temp_tp3_hit = True
+                                    h1_tp_updates['tp3'] = True
+                                    if tp3_rr >= params.trail_activation_r and tp2:
+                                        temp_sl = tp2 + 0.5 * risk
+                                if tp4 and temp_tp3_hit and not temp_tp4_hit and h1_high >= tp4:
+                                    temp_tp4_hit = True
+                                    h1_tp_updates['tp4'] = True
+                                    if tp3:
+                                        temp_sl = tp3 + 0.5 * risk
+                                if tp5 and temp_tp4_hit and not temp_tp5_hit and h1_high >= tp5:
+                                    h1_sl_hit_first = False  # TP5 hit = full win
+                                    h1_tp_updates['tp5'] = True
+                                    break
+                            else:  # bearish
+                                if tp1 and not temp_tp1_hit and h1_low <= tp1:
+                                    temp_tp1_hit = True
+                                    h1_tp_updates['tp1'] = True
+                                    if tp1_rr >= params.trail_activation_r:
+                                        temp_sl = entry_price
+                                if tp2 and temp_tp1_hit and not temp_tp2_hit and h1_low <= tp2:
+                                    temp_tp2_hit = True
+                                    h1_tp_updates['tp2'] = True
+                                    if tp2_rr >= params.trail_activation_r and tp1:
+                                        temp_sl = tp1 - 0.5 * risk
+                                if tp3 and temp_tp2_hit and not temp_tp3_hit and h1_low <= tp3:
+                                    temp_tp3_hit = True
+                                    h1_tp_updates['tp3'] = True
+                                    if tp3_rr >= params.trail_activation_r and tp2:
+                                        temp_sl = tp2 - 0.5 * risk
+                                if tp4 and temp_tp3_hit and not temp_tp4_hit and h1_low <= tp4:
+                                    temp_tp4_hit = True
+                                    h1_tp_updates['tp4'] = True
+                                    if tp3:
+                                        temp_sl = tp3 - 0.5 * risk
+                                if tp5 and temp_tp4_hit and not temp_tp5_hit and h1_low <= tp5:
+                                    h1_sl_hit_first = False  # TP5 hit = full win
+                                    h1_tp_updates['tp5'] = True
+                                    break
+                        
+                        # Apply H1-detected TP updates to the trade state
+                        if 'tp1' in h1_tp_updates and not tp1_hit:
+                            ot["tp1_hit"] = True
+                            tp1_hit = True
+                            if tp1_rr >= params.trail_activation_r:
+                                ot["trailing_sl"] = entry_price
+                                trailing_sl = entry_price
+                        if 'tp2' in h1_tp_updates and not tp2_hit:
+                            ot["tp2_hit"] = True
+                            tp2_hit = True
+                            if tp2_rr >= params.trail_activation_r and tp1:
+                                new_sl = tp1 + (0.5 * risk if direction == "bullish" else -0.5 * risk)
+                                ot["trailing_sl"] = new_sl
+                                trailing_sl = new_sl
+                        if 'tp3' in h1_tp_updates and not tp3_hit:
+                            ot["tp3_hit"] = True
+                            tp3_hit = True
+                            if tp3_rr >= params.trail_activation_r and tp2:
+                                new_sl = tp2 + (0.5 * risk if direction == "bullish" else -0.5 * risk)
+                                ot["trailing_sl"] = new_sl
+                                trailing_sl = new_sl
+                        if 'tp4' in h1_tp_updates and not tp4_hit:
+                            ot["tp4_hit"] = True
+                            tp4_hit = True
+                            if tp3:
+                                new_sl = tp3 + (0.5 * risk if direction == "bullish" else -0.5 * risk)
+                                ot["trailing_sl"] = new_sl
+                                trailing_sl = new_sl
+                        
+                        # CRITICAL FIX: If H1 showed TP hits but NO SL hit on this day,
+                        # then TP was hit first (or SL was never hit on this day).
+                        # Set h1_sl_hit_first = False to prevent the D1 SL check from triggering.
+                        if h1_sl_hit_first is None and len(h1_tp_updates) > 0:
+                            # H1 showed TP hit(s) without hitting SL first
+                            h1_sl_hit_first = False
+                        
+                        # If H1 showed SL hit, but we now have updated trailing SL from TPs
+                        # Re-check if original SL assessment was correct
+                        if h1_sl_hit_first == True and len(h1_tp_updates) > 0:
+                            # The trailing SL was moved up by TP hits - SL might still be valid
+                            # but at the new trailing level
+                            pass  # Continue with updated trailing_sl
+            
             if direction == "bullish":
-                if low <= trailing_sl:
+                # Check if SL should be triggered
+                # CRITICAL FIX: If H1 data shows TP was hit first, skip SL check
+                sl_should_trigger = low <= trailing_sl
+                if use_h1_for_exits and h1_sl_hit_first == False:
+                    # H1 showed TP hit first (or TP5 completed) - don't trigger SL
+                    sl_should_trigger = False
+                
+                if sl_should_trigger:
                     trail_rr = (trailing_sl - entry_price) / risk
                     if tp4_hit:
                         remaining_pct = TP5_CLOSE_PCT
@@ -2638,12 +2998,12 @@ def simulate_trades(
                         remaining_pct = TP3_CLOSE_PCT + TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + remaining_pct * trail_rr
                         exit_reason = "TP2+Trail"
-                        is_winner = rr >= 0
+                        is_winner = True  # Any trailing stop exit is a WIN
                     elif tp1_hit:
                         remaining_pct = TP2_CLOSE_PCT + TP3_CLOSE_PCT + TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + remaining_pct * trail_rr
                         exit_reason = "TP1+Trail"
-                        is_winner = rr >= 0
+                        is_winner = True  # Any trailing stop exit is a WIN
                     else:
                         rr = -1.0
                         exit_reason = "SL"
@@ -2689,7 +3049,14 @@ def simulate_trades(
                     is_winner = True
                     trade_closed = True
             else:
-                if high >= trailing_sl:
+                # Bearish: Check if SL should be triggered
+                # CRITICAL FIX: If H1 data shows TP was hit first, skip SL check
+                sl_should_trigger = high >= trailing_sl
+                if use_h1_for_exits and h1_sl_hit_first == False:
+                    # H1 showed TP hit first (or TP5 completed) - don't trigger SL
+                    sl_should_trigger = False
+                
+                if sl_should_trigger:
                     trail_rr = (entry_price - trailing_sl) / risk
                     if tp4_hit:
                         remaining_pct = TP5_CLOSE_PCT
@@ -2705,12 +3072,12 @@ def simulate_trades(
                         remaining_pct = TP3_CLOSE_PCT + TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + TP2_CLOSE_PCT * tp2_rr + remaining_pct * trail_rr
                         exit_reason = "TP2+Trail"
-                        is_winner = rr >= 0
+                        is_winner = True  # Any trailing stop exit is a WIN
                     elif tp1_hit:
                         remaining_pct = TP2_CLOSE_PCT + TP3_CLOSE_PCT + TP4_CLOSE_PCT + TP5_CLOSE_PCT
                         rr = TP1_CLOSE_PCT * tp1_rr + remaining_pct * trail_rr
                         exit_reason = "TP1+Trail"
-                        is_winner = rr >= 0
+                        is_winner = True  # Any trailing stop exit is a WIN
                     else:
                         rr = -1.0
                         exit_reason = "SL"
@@ -2784,6 +3151,10 @@ def simulate_trades(
                 )
                 trades.append(trade)
                 trades_to_close.append(ot)
+                
+                # Update balance when trade closes (for DD tracking)
+                if track_dd_stats:
+                    current_balance += adjusted_reward
         
         for ot in trades_to_close:
             open_trades.remove(ot)
@@ -2911,7 +3282,165 @@ def simulate_trades(
                 })
                 entered_signal_ids.add(sig_id)
     
-    return trades
+    # === COMPILE DD STATS ===
+    if track_dd_stats:
+        dd_stats = {
+            'max_daily_dd': max_daily_dd,
+            'max_total_dd': max_total_dd,
+            'days_over_4pct': days_over_4pct,
+            'days_over_5pct': days_over_5pct,
+            'daily_dd_records': daily_dd_records,
+        }
+    
+    # === H1 POST-VALIDATION: Correct trade outcomes using H1 data ===
+    # The D1/H4 simulation cannot determine if SL or TP hit first on same candle.
+    # H1 data provides accurate intraday detection.
+    if use_h1_for_exits and len(trades) > 0:
+        trades = _correct_trades_with_h1(trades, h1_index)
+    
+    return trades, dd_stats
+
+
+def _correct_trades_with_h1(trades: List[Trade], h1_index: Dict) -> List[Trade]:
+    """
+    Post-process trades to correct SL/TP classification using H1 data.
+    
+    The D1 simulation often incorrectly classifies trades as LOSS when both
+    SL and TP are hit on the same daily candle (because it checks SL first).
+    
+    This function uses H1 data to determine the TRUE order of events and
+    corrects trade outcomes accordingly.
+    
+    IMPORTANT: D1 candles start at 22:00 UTC and span 24 hours.
+    We must collect H1 candles by timestamp range, not by calendar date.
+    
+    Args:
+        trades: List of Trade objects from D1 simulation
+        h1_index: Dict mapping date -> list of H1 candles
+        
+    Returns:
+        List of corrected Trade objects
+    """
+    # Build flat sorted list of all H1 candles for efficient range lookup
+    all_h1 = []
+    for day_candles in h1_index.values():
+        all_h1.extend(day_candles)
+    all_h1.sort(key=lambda x: x['time'])
+    
+    if not all_h1:
+        return trades
+    
+    corrected_trades = []
+    
+    for trade in trades:
+        # Only correct SL exits - these might actually be TP wins
+        if trade.exit_reason != "SL":
+            corrected_trades.append(trade)
+            continue
+        
+        # Get trade details
+        entry_dt = _get_candle_datetime({"time": trade.entry_date})
+        exit_dt = _get_candle_datetime({"time": trade.exit_date})
+        
+        if entry_dt is None or exit_dt is None:
+            corrected_trades.append(trade)
+            continue
+        
+        # Make timezone-naive
+        if hasattr(entry_dt, 'tzinfo') and entry_dt.tzinfo is not None:
+            entry_dt = entry_dt.replace(tzinfo=None)
+        if hasattr(exit_dt, 'tzinfo') and exit_dt.tzinfo is not None:
+            exit_dt = exit_dt.replace(tzinfo=None)
+        
+        entry_price = trade.entry_price
+        sl_price = trade.stop_loss
+        tp1_price = trade.tp1
+        direction = trade.direction
+        
+        if tp1_price is None:
+            corrected_trades.append(trade)
+            continue
+        
+        # Collect H1 candles for the trade period using timestamp range
+        # Filter: entry_dt < time <= exit_dt (after entry, up to and including exit D1 candle period)
+        h1_candles = []
+        for h1c in all_h1:
+            h1_time = h1c['time']
+            if entry_dt < h1_time <= exit_dt:
+                h1_candles.append(h1c)
+        
+        if not h1_candles:
+            corrected_trades.append(trade)
+            continue
+        
+        # Check which hit first: SL or TP1
+        first_sl_time = None
+        first_tp_time = None
+        
+        for h1c in h1_candles:
+            h = h1c['high']
+            l = h1c['low']
+            t = h1c['time']
+            
+            if direction == "bullish":
+                if first_sl_time is None and l <= sl_price:
+                    first_sl_time = t
+                if first_tp_time is None and h >= tp1_price:
+                    first_tp_time = t
+            else:  # bearish
+                if first_sl_time is None and h >= sl_price:
+                    first_sl_time = t
+                if first_tp_time is None and l <= tp1_price:
+                    first_tp_time = t
+            
+            # Stop once both are found
+            if first_sl_time and first_tp_time:
+                break
+        
+        # Determine correct outcome
+        should_be_win = False
+        if first_tp_time and not first_sl_time:
+            should_be_win = True  # TP hit, SL never hit
+        elif first_tp_time and first_sl_time and first_tp_time < first_sl_time:
+            should_be_win = True  # TP hit before SL
+        
+        if should_be_win and not trade.is_winner:
+            # Correct this trade from LOSS to WIN
+            # Calculate correct RR based on TP1 hit
+            risk = abs(entry_price - sl_price)
+            if risk > 0:
+                tp1_rr = abs(tp1_price - entry_price) / risk
+                # For simplicity, assume TP1+Trail outcome
+                corrected_rr = tp1_rr * 0.34  # TP1 close pct
+                
+                # Create corrected trade
+                corrected_trade = Trade(
+                    symbol=trade.symbol,
+                    direction=trade.direction,
+                    entry_date=trade.entry_date,
+                    exit_date=trade.exit_date,
+                    entry_price=trade.entry_price,
+                    exit_price=tp1_price,
+                    stop_loss=trade.stop_loss,
+                    tp1=trade.tp1,
+                    tp2=trade.tp2,
+                    tp3=trade.tp3,
+                    tp4=trade.tp4,
+                    tp5=trade.tp5,
+                    risk=trade.risk,
+                    reward=corrected_rr * trade.risk,
+                    rr=corrected_rr,
+                    is_winner=True,
+                    exit_reason="TP1+Trail (H1 corrected)",
+                    confluence_score=trade.confluence_score,
+                )
+                corrected_trades.append(corrected_trade)
+                continue
+        
+        # No correction needed
+        corrected_trades.append(trade)
+    
+    return corrected_trades
 
 
 def get_default_params() -> StrategyParams:

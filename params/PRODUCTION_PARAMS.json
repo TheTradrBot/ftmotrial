@@ -1,0 +1,89 @@
+{
+  "PRODUCTION_LOCKED": true,
+  "production_version": "1.2.0",
+  "deployed_at": "2026-01-02T18:00:00Z",
+  "deployed_by": "manual_review",
+  
+  "source": {
+    "optimization_mode": "TPE",
+    "optimization_run": "2026-01-01 01:17:44",
+    "study_name": "regime_adaptive_v2_clean",
+    "trial_number": "best",
+    "best_score": 212.09867167160274,
+    "source_file": "ftmo_analysis_output/TPE/history/run_009/best_params.json",
+    "note": "EXACT copy of optimizer output - removed unused partial_exit_* parameters (commit 0cdd06f)",
+    "git_commit": "0cdd06f"
+  },
+  
+  "validation": {
+    "training_sharpe": 2.92,
+    "validation_sharpe": 4.76,
+    "training_total_r": 369.0,
+    "validation_total_r": 328.8,
+    "training_period": "2023-01-01 to 2024-09-30",
+    "validation_period": "2024-10-01 to 2025-12-26",
+    "win_rate_training": 47.4,
+    "win_rate_validation": 52.8,
+    "max_drawdown_pct": 16.4,
+    "profit_factor": 1.60,
+    "approved": true,
+    "approval_criteria": [
+      "Sharpe Ratio > 0.5",
+      "Win Rate > 45%",
+      "Profit Factor > 1.5",
+      "IS-OOS Degradation < 0.5"
+    ]
+  },
+
+  "parameters": {
+    "_RISK_MANAGEMENT_": "=== Risk & Position Sizing ===",
+    "risk_per_trade_pct": 0.65,
+    "daily_loss_halt_pct": 4.1,
+    "max_total_dd_warning": 7.9,
+    "consecutive_loss_halt": 9,
+    
+    "_CONFLUENCE_THRESHOLDS_": "=== Entry Signal Thresholds ===",
+    "min_confluence_score": 2,
+    "min_quality_factors": 3,
+    
+    "_REGIME_DETECTION_": "=== ADX Regime Thresholds ===",
+    "adx_trend_threshold": 20.0,
+    "adx_range_threshold": 13.0,
+    "trend_min_confluence": 6,
+    "range_min_confluence": 3,
+    
+    "_ATR_VOLATILITY_": "=== Volatility Scaling ===",
+    "atr_trail_multiplier": 1.5999999999999999,
+    "atr_vol_ratio_range": 0.9,
+    "atr_min_percentile": 42.0,
+    "december_atr_multiplier": 1.7,
+    "volatile_asset_boost": 1.35,
+    
+    "_TRAILING_STOP_": "=== Trailing Stop Activation ===",
+    "trail_activation_r": 0.65,
+    
+    "_TAKE_PROFIT_R_MULTIPLES_": "=== TP Levels as R-Multiples (run_009 values) ===",
+    "tp1_r_multiple": 1.7,
+    "tp2_r_multiple": 2.7,
+    "tp3_r_multiple": 6.0,
+    
+    "_PARTIAL_CLOSE_PERCENTAGES_": "=== Position % to Close at Each TP ===",
+    "tp1_close_pct": 0.34,
+    "tp2_close_pct": 0.16,
+    "tp3_close_pct": 0.35,
+    
+    "_FILTERS_DISABLED_": "=== All Filters Disabled for Baseline ===",
+    "use_htf_filter": false,
+    "use_structure_filter": false,
+    "use_confirmation_filter": false,
+    "use_fib_filter": false,
+    "use_displacement_filter": false,
+    "use_candle_rejection": false
+  },
+
+  "checksum": {
+    "algorithm": "sha256",
+    "params_hash": "pending_recalculation",
+    "note": "Hash will be verified by params_loader.py"
+  }
+}

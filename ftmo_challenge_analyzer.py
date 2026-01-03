@@ -923,16 +923,27 @@ def load_ohlcv_data(symbol: str, timeframe: str, start_date: datetime, end_date:
     global _DATA_CACHE
     data_dir = Path("data/ohlcv")
     
+    # Try both naming conventions: EUR_USD and EURUSD
     symbol_normalized = symbol.replace("_", "").replace("/", "")
+    symbol_with_underscore = symbol  # Keep original with underscores
     
-    tf_map = {"D1": "D1", "H4": "H4", "W1": "W1", "MN": "MN"}
+    tf_map = {"D1": "D1", "H4": "H4", "W1": "W1", "MN": "MN", "H1": "H1"}
     tf = tf_map.get(timeframe, timeframe)
     
     cache_key = f"{symbol_normalized}_{tf}"
     
     if cache_key not in _DATA_CACHE:
-        pattern = f"{symbol_normalized}_{tf}_*.csv"
-        matches = list(data_dir.glob(pattern))
+        # Try multiple patterns to handle inconsistent file naming
+        patterns_to_try = [
+            f"{symbol_normalized}_{tf}_*.csv",      # EURUSD_D1_*.csv
+            f"{symbol_with_underscore}_{tf}_*.csv", # EUR_USD_D1_*.csv
+        ]
+        
+        matches = []
+        for pattern in patterns_to_try:
+            matches = list(data_dir.glob(pattern))
+            if matches:
+                break
         
         if not matches:
             _DATA_CACHE[cache_key] = []
@@ -1103,6 +1114,7 @@ def run_full_period_backtest(
     
     all_trades: List[Trade] = []
     seen_trades = set()
+    symbol_dd_stats = {}  # Track DD stats per symbol for penalty calculation
     
     # Get timeframe configuration (defaults to D1/H4/W1/MN if not specified)
     if tf_config is None:
@@ -1124,6 +1136,10 @@ def run_full_period_backtest(
             confirmation_candles = load_ohlcv_data(symbol, confirmation_tf, start_date - timedelta(days=50), end_date)
             bias_candles = load_ohlcv_data(symbol, bias_tf, start_date - timedelta(days=365), end_date)
             sr_candles = load_ohlcv_data(symbol, sr_tf, start_date - timedelta(days=730), end_date)
+            
+            # NEW: Load H1 data for accurate SL/TP exit detection
+            # This fixes the critical bug where D1/H4 data can't determine exit order
+            h1_candles = load_ohlcv_data(symbol, 'H1', start_date - timedelta(days=30), end_date)
             
             if not entry_candles or len(entry_candles) < 30:
                 continue
@@ -1193,15 +1209,22 @@ def run_full_period_backtest(
                 tier3_dd_pct=tier3_dd_pct,
             )
             
-            trades = simulate_trades(
+            trades, dd_stats = simulate_trades(
                 candles=entry_candles,
                 symbol=symbol,
                 params=params,
                 h4_candles=confirmation_candles,
+                h1_candles=h1_candles,  # NEW: For accurate SL/TP exit detection
                 weekly_candles=bias_candles,
                 monthly_candles=sr_candles,
                 include_transaction_costs=True,
+                track_dd_stats=True,  # Track DD for penalty (no enforcement)
+                initial_balance=60000.0,
             )
+            
+            # Store DD stats for penalty calculation (symbol-level)
+            if dd_stats and symbol not in symbol_dd_stats:
+                symbol_dd_stats[symbol] = dd_stats
             
             for trade in trades:
                 if regime_info['mode'] == 'Range':
@@ -1258,7 +1281,19 @@ def run_full_period_backtest(
             if start_date <= entry <= end_date:
                 filtered_trades.append(trade)
     
-    return filtered_trades
+    # Aggregate DD stats across all symbols
+    aggregated_dd_stats = {
+        'max_daily_dd': max((s['max_daily_dd'] for s in symbol_dd_stats.values()), default=0.0),
+        'max_total_dd': max((s['max_total_dd'] for s in symbol_dd_stats.values()), default=0.0),
+        'days_over_4pct': sum(s['days_over_4pct'] for s in symbol_dd_stats.values()),
+        'days_over_5pct': sum(s['days_over_5pct'] for s in symbol_dd_stats.values()),
+        'total_trading_days': len(set(
+            date for s in symbol_dd_stats.values() 
+            for date, _ in s['daily_dd_records']
+        )) if symbol_dd_stats else 0,
+    }
+    
+    return filtered_trades, aggregated_dd_stats
 
 
 def convert_to_backtest_trade(
@@ -1642,7 +1677,7 @@ class OptunaOptimizer:
             trial.set_user_attr('overall_stats', {'trades': 0, 'profit': 0, 'win_rate': 0})
             return -999999.0
         
-        training_trades = run_full_period_backtest(
+        training_trades, training_dd_stats = run_full_period_backtest(
             start_date=TRAINING_START,
             end_date=TRAINING_END,
             min_confluence=params['min_confluence'],
@@ -1937,17 +1972,44 @@ class OptunaOptimizer:
         elif total_trades < 30:
             trade_bonus = -10.0 # Not enough trades for confidence
         
-        # Calculate final composite score
+        # ============================================================================
+        # NEW: 5ERS DAILY DD PENALTY (SOFT PENALTY INSTEAD OF HARD STOP)
+        # ============================================================================
+        # Based on actual Daily DD distribution from backtest
+        # Penalize days over 4% DD threshold (5% is hard limit in live trading)
+        daily_dd_penalty = 0.0
+        if training_dd_stats:
+            days_over_4pct = training_dd_stats.get('days_over_4pct', 0)
+            days_over_5pct = training_dd_stats.get('days_over_5pct', 0)
+            total_trading_days = training_dd_stats.get('total_trading_days', 1)
+            
+            # Penalty for days with DD > 4%
+            # Scale: 5 points per day over 4% (moderate penalty)
+            if days_over_4pct > 0:
+                daily_dd_penalty += days_over_4pct * 5.0
+            
+            # SEVERE penalty for days over 5% (would fail challenge)
+            # Scale: 25 points per day over 5% (heavy penalty)
+            if days_over_5pct > 0:
+                daily_dd_penalty += days_over_5pct * 25.0
+            
+            # Store stats for reporting
+            trial.set_user_attr('days_over_4pct_dd', days_over_4pct)
+            trial.set_user_attr('days_over_5pct_dd', days_over_5pct)
+            trial.set_user_attr('dd_breach_rate_pct', round((days_over_5pct / total_trading_days * 100), 2) if total_trading_days > 0 else 0)
+        
+        # Calculate final composite score WITH daily DD penalty
         final_score = (
             base_score +          # Core profitability in R
-            sharpe_bonus +        # Risk-adjusted return quality (NEW!)
+            sharpe_bonus +        # Risk-adjusted return quality
             pf_bonus +            # Profit factor quality
             wr_bonus +            # Win rate quality
             trade_bonus +         # Trade frequency balance
-            ftmo_pass_bonus -     # Bonus for passing FTMO (NEW!)
+            ftmo_pass_bonus -     # Bonus for passing FTMO
             dd_penalty -          # Drawdown risk
-            ftmo_dd_penalty -     # FTMO-specific DD penalty (NEW! CRITICAL!)
-            consistency_penalty   # Quarter consistency
+            ftmo_dd_penalty -     # FTMO-specific DD penalty
+            consistency_penalty - # Quarter consistency
+            daily_dd_penalty      # NEW: 5ers Daily DD penalty
         )
         
         # Store ALL metrics for analysis and multi-objective selection
@@ -1975,6 +2037,7 @@ class OptunaOptimizer:
             'dd_penalty': round(dd_penalty, 2),
             'ftmo_dd_penalty': round(ftmo_dd_penalty, 2),
             'consistency_penalty': round(consistency_penalty, 2),
+            'daily_dd_penalty': round(daily_dd_penalty, 2) if training_dd_stats else 0,
         })
         
         return final_score
@@ -2290,7 +2353,7 @@ def validate_top_trials(study, top_n: int = 5) -> List[Dict]:
         print(f"[{rank}/{len(sorted_trials)}] Trial #{trial.number} (Training Score: {score_display})")
         
         # Run validation backtest
-        validation_trades = run_full_period_backtest(
+        validation_trades, validation_dd_stats = run_full_period_backtest(
             start_date=VALIDATION_START,
             end_date=VALIDATION_END,
             min_confluence=params.get('min_confluence', 3),
@@ -2441,7 +2504,7 @@ def finalize_incomplete_run(optimization_mode: str = "TPE", top_n: int = 5):
     print(f"   Fetching training trades...")
     
     # Now fetch training trades for the best trial only
-    training_trades = run_full_period_backtest(
+    training_trades, _ = run_full_period_backtest(
         start_date=TRAINING_START,
         end_date=TRAINING_END,
         tf_config=self.tf_config,
@@ -2490,7 +2553,7 @@ def finalize_incomplete_run(optimization_mode: str = "TPE", top_n: int = 5):
     print(f"{'='*80}")
     
     # Run full period backtest
-    full_year_trades = run_full_period_backtest(
+    full_year_trades, full_period_dd_stats = run_full_period_backtest(
         start_date=TRAINING_START,
         end_date=VALIDATION_END,
         min_confluence=best_params.get('min_confluence', 3),
@@ -2908,7 +2971,7 @@ def multi_objective_function(trial) -> Tuple[float, float, float]:
     risk_pct = params['risk_per_trade_pct']
     
     # Run training backtest
-    training_trades = run_full_period_backtest(
+    training_trades, training_dd_stats = run_full_period_backtest(
         start_date=TRAINING_START,
         end_date=TRAINING_END,
         tf_config=GLOBAL_TF_CONFIG,
@@ -3208,7 +3271,7 @@ def run_validation_mode(start_date_str: str, end_date_str: str, params_file: str
 
     # Training period backtest
     print(f"\n📈 TRAINING PERIOD: {val_start.strftime('%Y-%m-%d')} to {training_end_date.strftime('%Y-%m-%d')}")
-    training_trades = run_full_period_backtest(
+    training_trades, _ = run_full_period_backtest(
         start_date=val_start,
         end_date=training_end_date,
         tf_config=GLOBAL_TF_CONFIG,

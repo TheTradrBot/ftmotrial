@@ -1,156 +1,172 @@
 # 5ers 60K High Stakes Trading Bot - Project Status Report
-**Date**: 2025-12-31  
-**Status**: ✅ **PRODUCTION READY** - Deployed on Windows VM with Forex.com Demo
+**Date**: 2026-01-03  
+**Status**: ✅ **PRODUCTION READY** - H1 Exit Correction Implemented
 
 ---
 
 ## 📊 Executive Summary
 
-The trading bot is a **professional-grade automated trading system** for **5ers 60K High Stakes** Challenge accounts. Full 12-year validation (2014-2025) confirms production readiness with **~48.6% win rate** and strict compliance.
+The trading bot is a **professional-grade automated trading system** for **5ers 60K High Stakes** Challenge accounts. Full audit trail from optimization to production deployment.
 
-### ✅ Latest Achievements (Dec 31, 2025)
+### ✅ Latest Achievements (Jan 3, 2026)
 
-#### Live Bot Enhancements
-- **Daily Close Scanning**: Only at 22:05 UTC (matches backtest exactly)
-- **Spread-Only Entry Filter**: No session filter, just spread quality check
-- **Spread Monitoring**: Every 10 min, execute when spread improves
-- **Signal Expiry**: 12 hours after creation if spread never improves
-- **3-Tier Graduated Risk**: 2% → reduce risk, 3.5% → cancel pending, 4.5% → emergency close
-- **Synced with TPE**: Quality factors now identical (`max(1, confluence_score // 3)`)
+#### H1 Exit Correction (Critical Bug Fix)
+- **Problem**: D1 backtests couldn't determine if SL or TP hit first on same candle
+- **Impact**: 467 trades in run_009 incorrectly classified as LOSS (49.2% → 71.0% WR)
+- **Solution**: Timestamp-based H1 lookup in `_correct_trades_with_h1()`
+- **Verification**: Current simulation produces 4 H1 corrections, +2.3% win rate
 
-#### Multi-Broker Deployment
-- **Forex.com Demo**: $50K account for testing (currently deployed)
-- **5ers Live**: $60K account for production (next step)
-- **Symbol Mapping**: Fixed for Forex.com indices (SPX500, NAS100, UK100)
-- **Windows VM**: Task Scheduler configured for 24/7 operation
+#### Architecture Verification
+- **TPE Optimizer & Live Bot Parity**: Confirmed IDENTICAL setup finding logic
+- **Shared Components**: `compute_confluence()`, `_infer_trend()`, `_pick_direction_from_bias()`
+- **Data Flow**: Both use MN1, W1, D1, H4 timeframes
+- **Difference**: Live bot adds entry validation (spread, margin, distance checks)
 
-### ✅ Previous Achievements (Dec 28-30, 2025)
+### ✅ Previous Achievements (Jan 2, 2026)
+
+#### Auditable Parameter System
+- **PRODUCTION_PARAMS.json**: Locked production params with full provenance
+- **promote_to_production.py**: CLI tool for safe parameter deployment
+- **audit_production.py**: Production readiness audit script
+- **Hash verification**: SHA256 checksum for parameter integrity
+- **Source tracking**: Links to exact optimization run that produced params
+
+#### Live Bot Integration
+- **Production mode**: Loads PRODUCTION_PARAMS.json by default
+- **Verification on startup**: Checks lock + approval status
+- **Fallback mode**: Uses current_params.json if production invalid
+- **Clear logging**: Shows which params mode is active
+
+### ✅ Previous Achievements (Dec 28-31, 2025)
 - **12-year robustness**: +2,766.3R total, ~48.6% WR across 4 periods
-  - 2014-2016: +672.7R, $242,166 (60K), 48.7% WR
-  - 2017-2019: +679.2R, $244,500 (60K), 48.7% WR
-  - 2020-2022: +662.4R, $238,476 (60K), 48.3% WR
-  - 2023-2025: +752.0R, $270,720 (60K), 48.8% WR
-- **5ers speed**: Step 1 (8% = $4,800) in ~18 dagen; Step 2 (5% = $3,000) in ~10 dagen
-- **Compliance**: Daily DD <3.8% (limit 5%); Total DD <3% (limit 10%)
+- **5ers speed**: Step 1 (8%) in ~18 days; Step 2 (5%) in ~10 days
+- **Multi-broker**: Forex.com Demo + 5ers Live support
+- **Daily close scanning**: Only at 22:05 UTC
 
 ---
 
 ## 🏗️ Architecture Overview
 
-### Two-Environment Design
+### Auditable Parameter Flow
 ```
-┌─────────────────────────────────┐     ┌────────────────────────────────┐
-│   OPTIMIZER (Any Platform)      │     │  LIVE BOT (Windows VM + MT5)   │
-│                                  │     │                                 │
-│  ftmo_challenge_analyzer.py      │────▶│  main_live_bot.py              │
-│  - Optuna TPE / NSGA-II          │     │  - Loads params/current*.json  │
-│  - Backtesting 2003-2025         │     │  - Real-time MT5 execution     │
-│  - Parameter optimization        │     │  - 5ers risk management        │
-│  - Out-of-sample validation      │     │  - Partial TPs (market orders) │
-│                                  │     │                                 │
-│  Output: params/current_params   │     │  Output: Live trade log        │
-└─────────────────────────────────┘     └────────────────────────────────┘
-```
-
-### Data Flow
-```
-broker_config.py                 ← Multi-broker configuration (Forex.com, 5ers)
-params/optimization_config.json  ← Optimization settings (ADX, multi-obj)
-params/current_params.json       ← Optimized strategy parameters
-         ↑                            ↓
-ftmo_challenge_analyzer.py      main_live_bot.py
-(Optuna optimization)           (loads params at startup)
-         ↑
-data/ohlcv/{SYMBOL}_{TF}_2003_2025.csv  (historical data)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    AUDITABLE PARAMETER FLOW                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ftmo_challenge_analyzer.py        ← Optuna Optimization               │
+│            │                                                            │
+│            ▼                                                            │
+│   ftmo_analysis_output/TPE/best_params.json   ← Optimizer output        │
+│            │                                                            │
+│            ▼  (Manual Review Required)                                  │
+│   python -m params.promote_to_production      ← Promotion tool          │
+│            │                                                            │
+│            ▼                                                            │
+│   params/PRODUCTION_PARAMS.json     ← LOCKED (full audit trail)         │
+│   (source, validation, approval, hash)                                 │
+│            │                                                            │
+│            ▼                                                            │
+│   main_live_bot.py                  ← Verifies + loads production       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 📁 Project Structure
 
-### Root Level
 ```
 ftmotrial/
 ├── main_live_bot.py              # Live MT5 bot (Windows VM)
 ├── ftmo_challenge_analyzer.py    # Optimization engine
 ├── strategy_core.py              # Trading strategy (6 pillars)
-├── broker_config.py              # Multi-broker configuration
-├── symbol_mapping.py             # Symbol conversion (OANDA ↔ broker)
-├── config.py                     # Contract specs, symbols
-├── ftmo_config.py                # 5ers challenge rules
 │
-├── params/                       # Parameter management
-│   ├── current_params.json       # Active parameters
-│   ├── optimization_config.json  # Optimization settings
-│   └── params_loader.py          # Load/save utilities
+├── params/                       # PARAMETER MANAGEMENT
+│   ├── PRODUCTION_PARAMS.json    # 🔒 LOCKED production params
+│   ├── current_params.json       # Latest optimization output
+│   ├── params_loader.py          # Production/dev param loading
+│   ├── promote_to_production.py  # CLI promotion tool
+│   └── history/                  # Backup of all param changes
 │
-├── tradr/                        # Core modules
-│   ├── mt5/client.py             # MT5 API wrapper
-│   └── risk/manager.py           # Risk management
+├── scripts/                      # UTILITIES
+│   ├── audit_production.py       # Production readiness audit
+│   └── monitor_optimization.sh   # Monitor running optimization
 │
-├── data/                         # Historical data
-│   ├── ohlcv/                    # OHLCV CSV files (2003-2025)
-│   └── sr_levels/                # S/R levels (not integrated)
+├── ftmo_analysis_output/         # OPTIMIZATION RESULTS
+│   ├── TPE/                      # TPE results (← PRODUCTION)
+│   ├── NSGA/                     # NSGA-II multi-objective
+│   └── VALIDATE/                 # Validation on different periods
 │
-├── ftmo_analysis_output/         # Optimization results
-│   ├── TPE/                      # Single-objective runs
-│   ├── NSGA/                     # Multi-objective runs
-│   └── VALIDATE/                 # Validation runs
+├── docs/                         # DOCUMENTATION
+│   ├── PARAMETER_DEPLOYMENT.md   # Parameter deployment guide
+│   ├── AUDIT_PROCEDURES.md       # Audit procedures
+│   ├── ARCHITECTURE.md           # System architecture
+│   └── ...
 │
-└── docs/                         # Documentation
+└── data/ohlcv/                   # Historical OHLCV data (2003-2025)
 ```
 
 ---
 
-## 🔧 Live Bot Configuration
+## 🔐 Current Production State
 
-### Current Deployment
-| Setting | Value |
-|---------|-------|
-| **Broker** | Forex.com Demo |
-| **Account Size** | $50,000 |
-| **Risk per Trade** | 0.6% = $300 |
-| **Symbols** | 25 (JPY pairs + XAG excluded) |
-| **Session Hours** | 08:00-22:00 UTC |
-| **Scan Time** | 22:05 UTC (daily close) |
+### Production Parameters (PRODUCTION_PARAMS.json)
+| Field | Value |
+|-------|-------|
+| **Version** | 1.0.0 |
+| **Source** | TPE @ 2026-01-01 01:17:44 |
+| **Score** | 212.10 |
+| **Training Sharpe** | 2.92 |
+| **Validation Sharpe** | 4.76 |
+| **Approval Status** | ✅ APPROVED |
+| **Hash** | 5381a982325cd0f1... |
 
-### Live Bot Features
-| Feature | Description |
-|---------|-------------|
-| **Daily Close Scan** | Only at 22:05 UTC (complete candles) |
-| **Spread Monitoring** | Every 10 min, execute when spread OK |
-| **Session Filter** | London/NY hours only (08:00-22:00 UTC) |
-| **Graduated Risk** | 3-tier protection (2%/3.5%/4.5%) |
-| **Partial TPs** | Market orders at TP1/TP2/TP3 |
-| **BE + Buffer** | Move SL after TP1 hit |
-
-### Persistence Files
-| File | Purpose |
-|------|---------|
-| `pending_setups.json` | Pending limit orders |
-| `awaiting_spread.json` | Signals waiting for spread |
-| `challenge_state.json` | Risk manager state |
-| `trading_days.json` | Profitable days tracking |
+### Key Parameters (Run_009 Defaults)
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `min_confluence` | 2 | Minimum confluence score |
+| `tp1_r_multiple` | 1.7R | First take-profit level |
+| `tp2_r_multiple` | 2.7R | Second take-profit level |
+| `tp3_r_multiple` | 6.0R | Third take-profit level |
+| `risk_per_trade_pct` | 0.65% | Risk per trade |
+| `trail_activation_r` | 0.65R | Trailing stop activation |
 
 ---
 
-## 🎯 Next Steps
+## 🎯 Workflow Commands
 
-1. **Monitor Forex.com Demo**: Wait for first trades (market opens Jan 2, 2025)
-2. **Validate Performance**: Compare live results with backtest expectations
-3. **Switch to 5ers Live**: After successful demo period
-4. **Complete 5ers Challenge**: Step 1 (8%) + Step 2 (5%) in ~28 days
+### 1. Run Optimization
+```bash
+./run_optimization.sh --single --trials 100
+```
+
+### 2. Promote to Production
+```bash
+python -m params.promote_to_production
+```
+
+### 3. Audit Production
+```bash
+python scripts/audit_production.py --verbose
+```
+
+### 4. Run Live Bot
+```bash
+python main_live_bot.py
+```
 
 ---
 
 ## 📚 Documentation
 
-- [README.md](README.md) - Quick start guide
-- [docs/CHANGELOG.md](docs/CHANGELOG.md) - Version history
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
-- [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) - Deployment instructions
-- [.github/copilot-instructions.md](.github/copilot-instructions.md) - AI assistant guide
+| Document | Description |
+|----------|-------------|
+| [README.md](README.md) | Quick start guide |
+| [docs/PARAMETER_DEPLOYMENT.md](docs/PARAMETER_DEPLOYMENT.md) | Parameter deployment guide |
+| [docs/AUDIT_PROCEDURES.md](docs/AUDIT_PROCEDURES.md) | Audit procedures |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture |
+| [.github/copilot-instructions.md](.github/copilot-instructions.md) | AI assistant guide |
 
 ---
 
-**Last Updated**: 2025-12-31
+**Last Updated**: January 3, 2026

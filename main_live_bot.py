@@ -130,14 +130,8 @@ BROKER_NAME = BROKER_CONFIG.broker_name
 try:
     from params.params_loader import get_min_confluence
     MIN_CONFLUENCE = get_min_confluence()
-    if MIN_CONFLUENCE is None:
-        raise ValueError("get_min_confluence returned None")
-except Exception as e:
-    # CRITICAL: Fallback must match run009 optimization
-    # Run009 optimized min_confluence=2 for best Sharpe ratio
-    MIN_CONFLUENCE = 2  # run009 optimized value
-    import logging
-    logging.warning(f"⚠️ Failed to load min_confluence from params: {e}. Using run009 default: {MIN_CONFLUENCE}")
+except Exception:
+    MIN_CONFLUENCE = 5  # Fallback if params not available
 
 # Get tradable symbols from broker config (respects excluded_symbols)
 TRADABLE_SYMBOLS = BROKER_CONFIG.get_tradable_symbols()
@@ -150,51 +144,49 @@ log.info("=" * 70)
 log.info(f"BROKER: {BROKER_NAME}")
 log.info(f"Demo Mode: {'YES ⚠️' if IS_DEMO else 'NO (LIVE)'}")
 log.info(f"Account Size: ${ACCOUNT_SIZE:,.0f}")
-log.info(f"Risk per Trade: {FIVEERS_CONFIG.risk_per_trade_pct}% = ${ACCOUNT_SIZE * FIVEERS_CONFIG.risk_per_trade_pct / 100:.0f}")
+log.info(f"Risk per Trade: {BROKER_CONFIG.risk_per_trade_pct}% = ${BROKER_CONFIG.risk_amount:.0f}")
 log.info(f"Tradable Symbols: {len(TRADABLE_SYMBOLS)}")
-log.info(f"Min Confluence: {MIN_CONFLUENCE}/7")
-log.info(f"(Full params loaded at bot initialization)")
 log.info("=" * 70)
 
 
 def load_best_params_from_file() -> Dict:
     """
-    Load best parameters from params/current_params.json (single source of truth).
+    Load PRODUCTION parameters from params/PRODUCTION_PARAMS.json.
     
-    NOTE: Parameters are ONLY loaded from params/current_params.json.
-    The optimizer writes to ftmo_analysis_output/{MODE}/best_params.json
-    but does NOT auto-update the live bot params. You must manually copy
-    the desired run's params to params/current_params.json.
+    This is the ONLY source of truth for live trading parameters.
+    Falls back to current_params.json if production params not available.
+    Uses StrategyParams defaults as final fallback.
     
-    Falls back to defaults if file doesn't exist.
+    Returns:
+        Dict of parameter names to values
     """
     try:
+        # First try: PRODUCTION_PARAMS.json (recommended for live trading)
         from params.params_loader import load_params_dict
-        params_dict = load_params_dict()
-        
-        # Handle naming mismatch: optimizer uses min_confluence_score, StrategyParams uses min_confluence
-        if 'parameters' in params_dict:
-            # New format: params nested under 'parameters' key
-            params = params_dict['parameters'].copy()
-        else:
-            # Old format: params at root level
-            params = params_dict.copy()
-        
-        # Rename min_confluence_score -> min_confluence if needed
-        if 'min_confluence_score' in params and 'min_confluence' not in params:
-            params['min_confluence'] = params.pop('min_confluence_score')
-        
-        # Remove any keys that aren't StrategyParams fields
-        from strategy_core import StrategyParams
-        import dataclasses
-        valid_fields = {f.name for f in dataclasses.fields(StrategyParams)}
-        params = {k: v for k, v in params.items() if k in valid_fields}
-        
-        log.info(f"✓ Loaded parameters from params/current_params.json")
+        from pathlib import Path
+        prod_file = Path("params/PRODUCTION_PARAMS.json")
+        if prod_file.exists():
+            import json
+            with open(prod_file, 'r') as f:
+                data = json.load(f)
+            params = data.get("parameters", {})
+            # Filter out documentation keys (starting with _)
+            clean_params = {k: v for k, v in params.items() if not k.startswith("_")}
+            log.info("✓ Loaded PRODUCTION parameters from params/PRODUCTION_PARAMS.json")
+            return clean_params
+    except Exception as e:
+        log.warning(f"Production params not available: {e}")
+    
+    try:
+        # Second try: current_params.json (latest optimization output)
+        from params.params_loader import load_params_dict
+        params = load_params_dict()
+        log.info("⚠ Using current_params.json (not production-locked)")
         return params
     except Exception as e:
-        log.warning(f"Could not load params/current_params.json: {e}")
+        log.warning(f"Could not load current_params.json: {e}")
     
+    log.warning("⚠ Using StrategyParams defaults (no params file found)")
     return {}  # Return empty dict to use StrategyParams defaults
 
 
@@ -214,31 +206,13 @@ class LiveTradingBot:
     Main live trading bot.
     
     Uses the EXACT SAME strategy logic as backtest.py for perfect parity.
-    
-    BACKTEST-MATCHED EXECUTION MODEL:
-    - Daily close scan at 22:15 UTC generates signals with entry levels
-    - Signals are stored in watching_setups (NOT placed as orders)
-    - Every 15 min, we check if price has reached entry level
-    - When price reaches entry AND spread is OK → MARKET ORDER
-    - Setups expire after 5 days (matching backtest's 5-bar wait)
-    
-    This matches backtest logic:
-        if low <= entry <= high: entry_price = theoretical_entry
+    Now uses pending orders to match backtest entry behavior exactly.
     """
     
     PENDING_SETUPS_FILE = "pending_setups.json"
-    WATCHING_SETUPS_FILE = "watching_setups.json"
     TRADING_DAYS_FILE = "trading_days.json"
-    VALIDATE_INTERVAL_MINUTES = 10      # Validate filled positions
-    MAIN_LOOP_INTERVAL_SECONDS = 10     # P/L monitoring
-    
-    # Daily close scan settings
-    DAILY_CLOSE_HOUR = 22               # NY close = 22:00 UTC
-    DAILY_CLOSE_DELAY_MINUTES = 15      # Wait 15 min after close for data
-    
-    # Entry monitoring settings (matches backtest)
-    ENTRY_CHECK_INTERVAL_MINUTES = 15   # Check if price reached entry (fast enough for intraday)
-    SETUP_EXPIRY_DAYS = 5               # Setups expire after 5 days (like backtest 5-bar wait)
+    VALIDATE_INTERVAL_MINUTES = 10
+    MAIN_LOOP_INTERVAL_SECONDS = 10
     
     def __init__(self):
         self.mt5 = MT5Client(
@@ -248,18 +222,20 @@ class LiveTradingBot:
         )
         self.risk_manager = RiskManager(state_file="challenge_state.json")
         
-        # Load best params from optimizer (if available), otherwise use defaults
+        # Load production params - uses PRODUCTION_PARAMS.json as single source of truth
+        # Returns a dict, not a StrategyParams object
         best_params_dict = load_best_params_from_file()
+        
+        # Create StrategyParams with loaded values (defaults are already run_009 values)
+        self.params = StrategyParams()
         if best_params_dict:
-            self.params = StrategyParams(**best_params_dict)
-        else:
-            self.params = StrategyParams()
+            # Apply loaded params to override defaults
+            for key, value in best_params_dict.items():
+                if hasattr(self.params, key):
+                    setattr(self.params, key, value)
         
         self.last_scan_time: Optional[datetime] = None
         self.last_validate_time: Optional[datetime] = None
-        self.last_entry_check_time: Optional[datetime] = None  # Track entry monitoring
-        self.last_daily_scan_date: Optional[date] = None  # Track which day we scanned
-        self.watching_setups: Dict[str, dict] = {}        # Setups waiting for price to reach entry
         self.scan_count = 0
         self.pending_setups: Dict[str, PendingSetup] = {}
         self.symbol_map: Dict[str, str] = {}  # our_symbol -> broker_symbol
@@ -272,7 +248,6 @@ class LiveTradingBot:
         self.challenge_end_date: Optional[datetime] = None
         
         self._load_pending_setups()
-        self._load_watching_setups()  # Load setups waiting for price to reach entry
         self._load_trading_days()
         self._auto_start_challenge()
     
@@ -297,372 +272,6 @@ class LiveTradingBot:
                 json.dump(data, f, indent=2, default=str)
         except Exception as e:
             log.error(f"Error saving pending setups: {e}")
-    
-    def _is_daily_close_scan_time(self) -> bool:
-        """
-        Check if it's time for the daily close scan.
-        
-        Scan happens ONCE per day at 22:15 UTC (NY close + 15 min buffer).
-        This ensures we have complete daily candles before scanning.
-        """
-        now = datetime.now(timezone.utc)
-        today = now.date()
-        
-        # Already scanned today?
-        if self.last_daily_scan_date == today:
-            return False
-        
-        # Is it past scan time (22:15 UTC)?
-        scan_hour = self.DAILY_CLOSE_HOUR
-        scan_minute = self.DAILY_CLOSE_DELAY_MINUTES
-        scan_time = now.replace(hour=scan_hour, minute=scan_minute, second=0, microsecond=0)
-        
-        if now >= scan_time:
-            log.info(f"📅 Daily close scan time reached: {now.strftime('%H:%M')} UTC")
-            return True
-        
-        return False
-    
-    def _get_next_scan_time(self) -> datetime:
-        """Get the next daily close scan time."""
-        now = datetime.now(timezone.utc)
-        scan_time = now.replace(
-            hour=self.DAILY_CLOSE_HOUR,
-            minute=self.DAILY_CLOSE_DELAY_MINUTES,
-            second=0,
-            microsecond=0
-        )
-        
-        # If past today's scan time, next scan is tomorrow
-        if now >= scan_time:
-            scan_time = scan_time + timedelta(days=1)
-        
-        return scan_time
-    
-    def _load_watching_setups(self):
-        """Load watching setups from file (setups waiting for price to reach entry)."""
-        try:
-            if Path(self.WATCHING_SETUPS_FILE).exists():
-                with open(self.WATCHING_SETUPS_FILE, 'r') as f:
-                    self.watching_setups = json.load(f)
-                log.info(f"Loaded {len(self.watching_setups)} watching setups from file")
-        except Exception as e:
-            log.error(f"Error loading watching setups: {e}")
-            self.watching_setups = {}
-    
-    def _save_watching_setups(self):
-        """Save watching setups to file."""
-        try:
-            with open(self.WATCHING_SETUPS_FILE, 'w') as f:
-                json.dump(self.watching_setups, f, indent=2, default=str)
-        except Exception as e:
-            log.error(f"Error saving watching setups: {e}")
-    
-    def _check_entry_levels(self):
-        """
-        Check if price has reached entry level for watching setups.
-        
-        MATCHES BACKTEST LOGIC EXACTLY:
-        - Backtest: if low <= entry <= high → entry_price = theoretical_entry
-        - Live: if current_price crosses entry level → place MARKET ORDER
-        
-        Called every 15 minutes to check all watching setups.
-        This is the core of backtest-matched execution.
-        """
-        if not self.watching_setups:
-            return
-        
-        log.info(f"🔍 Checking entry levels for {len(self.watching_setups)} watching setups...")
-        
-        symbols_to_remove = []
-        entries_placed = 0
-        
-        for symbol, setup_info in list(self.watching_setups.items()):
-            try:
-                broker_symbol = self.symbol_map.get(symbol)
-                if not broker_symbol:
-                    broker_symbol = oanda_to_ftmo(symbol)
-                
-                # Check if we already have a position
-                if self.check_existing_position(broker_symbol):
-                    log.info(f"[{symbol}] Already in position, removing from watching list")
-                    symbols_to_remove.append(symbol)
-                    continue
-                
-                # Get current tick
-                tick = self.mt5.get_tick(broker_symbol)
-                if tick is None:
-                    log.warning(f"[{symbol}] Cannot get tick for entry check")
-                    continue
-                
-                entry = setup_info["entry"]
-                direction = setup_info["direction"]
-                sl = setup_info["stop_loss"]
-                created_at = setup_info.get("created_at", datetime.now(timezone.utc).isoformat())
-                
-                if isinstance(created_at, str):
-                    created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                
-                # Check 5-day expiration (matches backtest 5-bar wait)
-                days_watching = (datetime.now(timezone.utc) - created_at).total_seconds() / 86400
-                if days_watching > self.SETUP_EXPIRY_DAYS:
-                    log.info(f"[{symbol}] Setup expired after {days_watching:.1f} days (max: {self.SETUP_EXPIRY_DAYS})")
-                    symbols_to_remove.append(symbol)
-                    continue
-                
-                # Current price based on direction
-                current_price = tick.bid if direction == "bullish" else tick.ask
-                
-                # Check if price has reached entry level
-                # For bullish: price should drop TO or BELOW entry, then we buy
-                # For bearish: price should rise TO or ABOVE entry, then we sell
-                entry_reached = False
-                
-                if direction == "bullish":
-                    # Bullish entry: we want to buy when price drops to entry level
-                    # Entry reached if current price <= entry (price came down to our level)
-                    if current_price <= entry:
-                        entry_reached = True
-                        log.info(f"[{symbol}] 🎯 BULLISH entry reached: price {current_price:.5f} <= entry {entry:.5f}")
-                else:
-                    # Bearish entry: we want to sell when price rises to entry level
-                    # Entry reached if current price >= entry (price came up to our level)
-                    if current_price >= entry:
-                        entry_reached = True
-                        log.info(f"[{symbol}] 🎯 BEARISH entry reached: price {current_price:.5f} >= entry {entry:.5f}")
-                
-                if not entry_reached:
-                    # Log progress occasionally
-                    distance = abs(current_price - entry)
-                    risk = abs(entry - sl)
-                    distance_r = distance / risk if risk > 0 else 0
-                    log.debug(f"[{symbol}] Watching: {direction} entry {entry:.5f}, current {current_price:.5f} ({distance_r:.2f}R away), day {days_watching:.1f}/{self.SETUP_EXPIRY_DAYS}")
-                    continue
-                
-                # Entry level reached! Now check spread
-                pip_size = get_pip_size(symbol)
-                if pip_size <= 0:
-                    pip_size = 0.0001
-                
-                current_spread_pips = tick.spread / pip_size
-                
-                if not FIVEERS_CONFIG.is_spread_acceptable(symbol, current_spread_pips):
-                    max_spread = FIVEERS_CONFIG.get_max_spread_pips(symbol)
-                    log.warning(f"[{symbol}] Entry level reached but spread too wide: {current_spread_pips:.1f} > {max_spread:.1f} pips - will retry")
-                    continue
-                
-                # ENTRY LEVEL REACHED + SPREAD OK → PLACE MARKET ORDER!
-                log.info(f"[{symbol}] ✅ Entry level reached + spread OK ({current_spread_pips:.1f} pips) - placing MARKET ORDER!")
-                
-                # Update setup with current price for order placement
-                setup_info["current_price"] = current_price
-                
-                if self._place_market_entry(setup_info):
-                    symbols_to_remove.append(symbol)
-                    entries_placed += 1
-                    log.info(f"[{symbol}] ✅ MARKET ORDER PLACED - matched backtest entry behavior!")
-                else:
-                    log.warning(f"[{symbol}] Failed to place market order")
-                
-                time.sleep(0.2)
-                
-            except Exception as e:
-                log.error(f"[{symbol}] Error checking entry level: {e}")
-                import traceback
-                log.error(traceback.format_exc())
-        
-        # Remove processed setups
-        for symbol in symbols_to_remove:
-            if symbol in self.watching_setups:
-                del self.watching_setups[symbol]
-        
-        if symbols_to_remove:
-            self._save_watching_setups()
-            log.info(f"Removed {len(symbols_to_remove)} setups from watching list ({entries_placed} entries placed)")
-    
-    def _place_market_entry(self, setup: Dict) -> bool:
-        """
-        Place a market order when price reaches entry level.
-        
-        This is called by _check_entry_levels when the backtest condition is met:
-        - Price has reached the entry level
-        - Spread is acceptable
-        
-        Uses the same risk calculation as the original place_setup_order,
-        but ONLY places market orders (no pending orders).
-        """
-        from ftmo_config import FTMO_CONFIG, get_pip_size, get_sl_limits
-        
-        symbol = setup["symbol"]
-        broker_symbol = setup.get("broker_symbol", self.symbol_map.get(symbol, symbol))
-        direction = setup["direction"]
-        current_price = setup.get("current_price", 0)
-        entry = setup["entry"]
-        sl = setup["stop_loss"]
-        tp1 = setup["tp1"]
-        tp2 = setup.get("tp2")
-        tp3 = setup.get("tp3")
-        tp4 = setup.get("tp4")
-        tp5 = setup.get("tp5")
-        confluence = setup["confluence"]
-        quality_factors = setup["quality_factors"]
-        
-        # Check we don't already have a position
-        if symbol in self.pending_setups:
-            existing = self.pending_setups[symbol]
-            if existing.status in ["pending", "filled"]:
-                log.info(f"[{symbol}] Already have setup, skipping market entry")
-                return False
-        
-        if self.check_existing_position(broker_symbol):
-            log.info(f"[{symbol}] Already in position, skipping market entry")
-            return False
-        
-        # Risk calculations (same as place_setup_order)
-        if CHALLENGE_MODE and self.challenge_manager:
-            snapshot = self.challenge_manager.get_account_snapshot()
-            if snapshot is None:
-                log.error(f"[{symbol}] Cannot get account snapshot")
-                return False
-            
-            daily_loss_pct = abs(snapshot.daily_pnl_pct) if snapshot.daily_pnl_pct < 0 else 0
-            total_dd_pct = snapshot.total_drawdown_pct
-            profit_pct = (snapshot.equity - self.challenge_manager.initial_balance) / self.challenge_manager.initial_balance * 100
-            
-            # Check trading limits
-            if daily_loss_pct >= FIVEERS_CONFIG.daily_loss_halt_pct:
-                log.warning(f"[{symbol}] Trading halted: daily loss {daily_loss_pct:.1f}%")
-                return False
-            
-            if total_dd_pct >= FIVEERS_CONFIG.total_dd_emergency_pct:
-                log.warning(f"[{symbol}] Trading halted: total DD {total_dd_pct:.1f}%")
-                return False
-            
-            # Get risk percentage
-            if FIVEERS_CONFIG.use_dynamic_lot_sizing:
-                win_streak = getattr(self.risk_manager.state, 'win_streak', 0) if hasattr(self.risk_manager, 'state') else 0
-                loss_streak = getattr(self.risk_manager.state, 'loss_streak', 0) if hasattr(self.risk_manager, 'state') else 0
-                risk_pct = FIVEERS_CONFIG.get_dynamic_risk_pct(
-                    confluence_score=confluence,
-                    win_streak=win_streak,
-                    loss_streak=loss_streak,
-                    current_profit_pct=profit_pct,
-                    daily_loss_pct=daily_loss_pct,
-                    total_dd_pct=total_dd_pct,
-                )
-            else:
-                risk_pct = FIVEERS_CONFIG.get_risk_pct(daily_loss_pct, total_dd_pct)
-            
-            if risk_pct <= 0:
-                log.warning(f"[{symbol}] Risk percentage is 0 - trading halted")
-                return False
-            
-            from tradr.risk.position_sizing import calculate_lot_size
-            
-            symbol_info = self.mt5.get_symbol_info(broker_symbol)
-            max_lot = symbol_info.get('max_lot', 100.0) if symbol_info else 100.0
-            min_lot = symbol_info.get('min_lot', 0.01) if symbol_info else 0.01
-            
-            lot_result = calculate_lot_size(
-                symbol=broker_symbol,
-                account_balance=snapshot.balance,
-                risk_percent=risk_pct / 100,
-                entry_price=current_price,  # Use current price for market order
-                stop_loss_price=sl,
-                max_lot=max_lot,
-                min_lot=min_lot,
-            )
-            
-            if lot_result.get("error") or lot_result["lot_size"] <= 0:
-                log.warning(f"[{symbol}] Cannot calculate lot size: {lot_result.get('error', 'unknown error')}")
-                return False
-            
-            lot_size = lot_result["lot_size"]
-            risk_usd = lot_result["risk_usd"]
-            
-            if symbol_info:
-                lot_step = symbol_info.get('lot_step', 0.01)
-                lot_size = max(min_lot, round(lot_size / lot_step) * lot_step)
-                lot_size = min(lot_size, max_lot)
-            
-            log.info(f"[{symbol}] Risk: {risk_pct:.2f}% = ${risk_usd:.2f}, Lot: {lot_size}")
-        else:
-            risk_check = self.risk_manager.check_trade(
-                symbol=broker_symbol,
-                direction=direction,
-                entry_price=current_price,
-                stop_loss_price=sl,
-            )
-            
-            if not risk_check.allowed:
-                log.warning(f"[{symbol}] Trade blocked by risk manager: {risk_check.reason}")
-                return False
-            
-            lot_size = risk_check.adjusted_lot
-        
-        # PLACE MARKET ORDER (this matches backtest instant fill when price reaches entry)
-        log.info(f"[{symbol}] Placing MARKET ORDER (backtest-matched entry)")
-        log.info(f"  Direction: {direction.upper()}")
-        log.info(f"  Current Price: {current_price:.5f}")
-        log.info(f"  Original Entry Level: {entry:.5f}")
-        log.info(f"  SL: {sl:.5f}")
-        log.info(f"  Lot Size: {lot_size}")
-        
-        result = self.mt5.place_market_order(
-            symbol=broker_symbol,
-            direction=direction,
-            volume=lot_size,
-            sl=sl,
-            tp=0,  # No auto-TP - bot manages partial closes manually
-        )
-        
-        if not result.success:
-            log.error(f"[{symbol}] Market order FAILED: {result.error}")
-            return False
-        
-        log.info(f"[{symbol}] ✅ MARKET ORDER FILLED!")
-        log.info(f"  Order Ticket: {result.order_id}")
-        log.info(f"  Fill Price: {result.price:.5f}")
-        log.info(f"  Volume: {result.volume}")
-        
-        self.risk_manager.record_trade_open(
-            symbol=broker_symbol,
-            direction=direction,
-            entry_price=result.price,
-            stop_loss=sl,
-            lot_size=result.volume,
-            order_id=result.order_id,
-        )
-        
-        # Track as filled setup for TP management
-        pending_setup = PendingSetup(
-            symbol=symbol,
-            direction=direction,
-            entry_price=result.price,
-            stop_loss=sl,
-            tp1=tp1,
-            tp2=tp2,
-            tp3=tp3,
-            tp4=tp4,
-            tp5=tp5,
-            confluence=confluence,
-            confluence_score=confluence,
-            quality_factors=quality_factors,
-            entry_distance_r=0,  # We're at entry
-            created_at=datetime.now(timezone.utc).isoformat(),
-            order_ticket=result.order_id,
-            status="filled",
-            lot_size=result.volume,
-        )
-        
-        self.pending_setups[symbol] = pending_setup
-        self._save_pending_setups()
-        
-        # Track trading day
-        self.trading_days.add(datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-        self._save_trading_days()
-        
-        return True
     
     def _load_trading_days(self):
         """Load trading days from file for FTMO minimum trading days tracking."""
@@ -1116,21 +725,20 @@ class LiveTradingBot:
                 risk = abs(entry - sl)
                 log.info(f"[{symbol}] SL adjusted to {FIVEERS_CONFIG.min_sl_atr_ratio} ATR: {sl:.5f}")
             
-        # Calculate TPs using EXACT same R multiples as backtest (from StrategyParams)
-        # Run009 backtest used: TP1=0.6R, TP2=1.2R, TP3=2.0R
+        # Calculate TPs using EXACT same R multiples as backtest (including TP4 and TP5)
         risk = abs(entry - sl)
         if direction == "bullish":
-            tp1 = entry + (risk * self.params.atr_tp1_multiplier)
-            tp2 = entry + (risk * self.params.atr_tp2_multiplier)
-            tp3 = entry + (risk * self.params.atr_tp3_multiplier)
-            tp4 = entry + (risk * self.params.atr_tp4_multiplier)
-            tp5 = entry + (risk * self.params.atr_tp5_multiplier)
+            tp1 = entry + (risk * FIVEERS_CONFIG.tp1_r_multiple)
+            tp2 = entry + (risk * FIVEERS_CONFIG.tp2_r_multiple)
+            tp3 = entry + (risk * FIVEERS_CONFIG.tp3_r_multiple)
+            tp4 = entry + (risk * FIVEERS_CONFIG.tp4_r_multiple)
+            tp5 = entry + (risk * FIVEERS_CONFIG.tp5_r_multiple)
         else:
-            tp1 = entry - (risk * self.params.atr_tp1_multiplier)
-            tp2 = entry - (risk * self.params.atr_tp2_multiplier)
-            tp3 = entry - (risk * self.params.atr_tp3_multiplier)
-            tp4 = entry - (risk * self.params.atr_tp4_multiplier)
-            tp5 = entry - (risk * self.params.atr_tp5_multiplier)
+            tp1 = entry - (risk * FIVEERS_CONFIG.tp1_r_multiple)
+            tp2 = entry - (risk * FIVEERS_CONFIG.tp2_r_multiple)
+            tp3 = entry - (risk * FIVEERS_CONFIG.tp3_r_multiple)
+            tp4 = entry - (risk * FIVEERS_CONFIG.tp4_r_multiple)
+            tp5 = entry - (risk * FIVEERS_CONFIG.tp5_r_multiple)
         
         if direction == "bullish":
             if current_price <= sl:
@@ -1147,11 +755,11 @@ class LiveTradingBot:
         log.info(f"  Current Price: {current_price:.5f}")
         log.info(f"  Entry: {entry:.5f} ({entry_distance_r:.2f}R away)")
         log.info(f"  SL: {sl:.5f} ({sl_pips:.1f} pips)")
-        log.info(f"  TP1: {tp1:.5f} ({self.params.atr_tp1_multiplier}R)")
-        log.info(f"  TP2: {tp2:.5f} ({self.params.atr_tp2_multiplier}R)")
-        log.info(f"  TP3: {tp3:.5f} ({self.params.atr_tp3_multiplier}R)")
-        log.info(f"  TP4: {tp4:.5f} ({self.params.atr_tp4_multiplier}R)")
-        log.info(f"  TP5: {tp5:.5f} ({self.params.atr_tp5_multiplier}R)")
+        log.info(f"  TP1: {tp1:.5f} ({FIVEERS_CONFIG.tp1_r_multiple}R)")
+        log.info(f"  TP2: {tp2:.5f} ({FIVEERS_CONFIG.tp2_r_multiple}R)")
+        log.info(f"  TP3: {tp3:.5f} ({FIVEERS_CONFIG.tp3_r_multiple}R)")
+        log.info(f"  TP4: {tp4:.5f} ({FIVEERS_CONFIG.tp4_r_multiple}R)")
+        log.info(f"  TP5: {tp5:.5f} ({FIVEERS_CONFIG.tp5_r_multiple}R)")
         
         return {
             "symbol": symbol,
@@ -1283,15 +891,7 @@ class LiveTradingBot:
                 
                 if not FIVEERS_CONFIG.is_spread_acceptable(symbol, current_spread_pips):
                     max_spread = FIVEERS_CONFIG.get_max_spread_pips(symbol)
-                    log.warning(f"[{symbol}] Spread too wide: {current_spread_pips:.1f} pips > {max_spread:.1f} pips max - adding to retry queue")
-                    
-                    # Add to waiting_for_entry for retry every 10 min
-                    if symbol not in self.waiting_for_entry:
-                        setup["wait_start"] = datetime.now(timezone.utc).isoformat()
-                        setup["broker_symbol"] = broker_symbol
-                        self.waiting_for_entry[symbol] = setup
-                        log.info(f"[{symbol}] Added to spread retry queue (will retry every 10 min)")
-                    
+                    log.warning(f"[{symbol}] Spread too wide: {current_spread_pips:.1f} pips > {max_spread:.1f} pips max - skipping trade")
                     return False
                 
                 log.info(f"[{symbol}] Spread check passed: {current_spread_pips:.1f} pips")
@@ -1871,14 +1471,17 @@ class LiveTradingBot:
         """
         Manage partial take profits for active positions.
         
-        MATCHED TO BACKTEST (simulate_trades in strategy_core.py):
-        - TP1 hit (0.6R): Close tp1_close_pct (34%), SL → entry (breakeven)
-        - TP2 hit (1.2R): Close tp2_close_pct (16%), SL → TP1 + 0.5R
-        - TP3 hit (2.0R): Close tp3_close_pct (35%), SL → TP2 + 0.5R
-        - TP4 hit (3.0R): Close tp4_close_pct (default 20%), SL → TP3 + 0.5R
-        - TP5 hit (4.0R): Close remainder (tp5_close_pct)
+        Challenge Mode Strategy (FTMO Optimized):
+        - TP1 hit: Close 45% of position volume at +0.8-1R
+        - TP2 hit: Close 30% at +2R
+        - TP3 hit: Close remaining 25% at +3-4R or trailing
+        - Move SL to breakeven + buffer after TP1
         
-        Trailing SL progression matches backtest exactly.
+        Standard Mode:
+        - TP1 hit: Close 33% of position volume
+        - TP2 hit: Close 50% of remaining
+        - TP3 hit: Close remainder
+        
         Tracks partial close state in pending_setups.
         """
         positions = self.mt5.get_my_positions()
@@ -1904,143 +1507,86 @@ class LiveTradingBot:
             tp1 = setup.tp1
             tp2 = setup.tp2
             tp3 = setup.tp3
-            tp4 = getattr(setup, 'tp4', None)
-            tp5 = getattr(setup, 'tp5', None)
-            
-            # Calculate risk for trailing SL progression
-            risk = abs(setup.entry_price - setup.stop_loss)
             
             partial_state = getattr(setup, 'partial_closes', 0) if hasattr(setup, 'partial_closes') else 0
             
             tp1_hit = False
             tp2_hit = False
             tp3_hit = False
-            tp4_hit = False
-            tp5_hit = False
             
             if setup.direction == "bullish":
                 tp1_hit = current_price >= tp1 if tp1 else False
                 tp2_hit = current_price >= tp2 if tp2 else False
                 tp3_hit = current_price >= tp3 if tp3 else False
-                tp4_hit = current_price >= tp4 if tp4 else False
-                tp5_hit = current_price >= tp5 if tp5 else False
             else:
                 tp1_hit = current_price <= tp1 if tp1 else False
                 tp2_hit = current_price <= tp2 if tp2 else False
                 tp3_hit = current_price <= tp3 if tp3 else False
-                tp4_hit = current_price <= tp4 if tp4 else False
-                tp5_hit = current_price <= tp5 if tp5 else False
             
             original_volume = setup.lot_size
             current_volume = pos.volume
             
-            # Get partial close percentages from config (matches backtest StrategyParams)
-            tp1_pct = FIVEERS_CONFIG.tp1_close_pct  # 0.34 (34%)
-            tp2_pct = FIVEERS_CONFIG.tp2_close_pct  # 0.16 (16%)
-            tp3_pct = FIVEERS_CONFIG.tp3_close_pct  # 0.35 (35%)
-            tp4_pct = getattr(FIVEERS_CONFIG, 'tp4_close_pct', 0.10)  # 10% for TP4
-            tp5_pct = getattr(FIVEERS_CONFIG, 'tp5_close_pct', 0.05)  # 5% remainder for TP5
+            # EXACT same partial close volumes as backtest_live_bot.py
+            if CHALLENGE_MODE and self.challenge_manager:
+                tp1_vol, tp2_vol, tp3_vol = self.challenge_manager.get_partial_close_volumes(original_volume)
+            else:
+                # Match backtest: 45% TP1, 30% TP2, 25% TP3
+                tp1_vol = round(original_volume * FIVEERS_CONFIG.tp1_close_pct, 2)
+                tp2_vol = round(original_volume * FIVEERS_CONFIG.tp2_close_pct, 2)
+                tp3_vol = round(original_volume * FIVEERS_CONFIG.tp3_close_pct, 2)
             
-            tp1_vol = max(0.01, round(original_volume * tp1_pct, 2))
-            tp2_vol = max(0.01, round(original_volume * tp2_pct, 2))
-            tp3_vol = max(0.01, round(original_volume * tp3_pct, 2))
-            tp4_vol = max(0.01, round(original_volume * tp4_pct, 2))
-            tp5_vol = max(0.01, round(original_volume * tp5_pct, 2))
+            tp1_vol = max(0.01, tp1_vol)
+            tp2_vol = max(0.01, tp2_vol)
+            tp3_vol = max(0.01, tp3_vol)
             
-            # TP1 HIT: Close 34%, SL → entry (breakeven)
             if tp1_hit and partial_state == 0:
                 close_volume = min(tp1_vol, current_volume)
                 
                 if close_volume >= 0.01:
-                    pct_display = int(tp1_pct * 100)
-                    log.info(f"[{symbol}] TP1 HIT ({self.params.atr_tp1_multiplier}R)! Closing {pct_display}% ({close_volume} lots)")
+                    pct_display = int((tp1_vol / original_volume) * 100) if original_volume > 0 else 0
+                    log.info(f"[{symbol}] TP1 HIT! Closing {pct_display}% ({close_volume} lots) of position")
                     result = self.mt5.partial_close(pos.ticket, close_volume)
                     if result.success:
                         log.info(f"[{symbol}] Partial close successful at {result.price}")
                         setup.partial_closes = 1
                         self._save_pending_setups()
                         
-                        # BACKTEST MATCH: SL → entry (breakeven, no buffer)
-                        new_sl = setup.entry_price
-                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp2 if tp2 else None)
-                        log.info(f"[{symbol}] SL moved to breakeven ({new_sl:.5f})")
+                        be_buffer = abs(setup.entry_price - setup.stop_loss) * 0.1
+                        if setup.direction == "bullish":
+                            new_sl = setup.entry_price + be_buffer
+                        else:
+                            new_sl = setup.entry_price - be_buffer
+                        
+                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp2 if tp2 else tp1)
+                        log.info(f"[{symbol}] SL moved to BE+buffer ({new_sl:.5f}), TP updated to TP2: {tp2 if tp2 else 'N/A'}")
                     else:
                         log.error(f"[{symbol}] Partial close failed: {result.error}")
             
-            # TP2 HIT: Close 16%, SL → TP1 + 0.5R
             elif tp2_hit and partial_state == 1:
-                close_volume = min(tp2_vol, current_volume)
+                remaining_volume = current_volume
+                close_volume = min(tp2_vol, remaining_volume)
                 if close_volume >= 0.01:
-                    pct_display = int(tp2_pct * 100)
-                    log.info(f"[{symbol}] TP2 HIT ({self.params.atr_tp2_multiplier}R)! Closing {pct_display}% ({close_volume} lots)")
+                    pct_display = int((tp2_vol / original_volume) * 100) if original_volume > 0 else 0
+                    log.info(f"[{symbol}] TP2 HIT! Closing {pct_display}% ({close_volume} lots)")
                     result = self.mt5.partial_close(pos.ticket, close_volume)
                     if result.success:
                         log.info(f"[{symbol}] Partial close successful at {result.price}")
                         setup.partial_closes = 2
                         self._save_pending_setups()
                         
-                        # BACKTEST MATCH: SL → TP1 + 0.5R
-                        if setup.direction == "bullish":
-                            new_sl = tp1 + (0.5 * risk)
-                        else:
-                            new_sl = tp1 - (0.5 * risk)
-                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp3 if tp3 else None)
-                        log.info(f"[{symbol}] SL moved to TP1+0.5R ({new_sl:.5f})")
+                        if tp3:
+                            self.mt5.modify_sl_tp(pos.ticket, tp=tp3)
+                            log.info(f"[{symbol}] TP updated to TP3: {tp3}")
                     else:
                         log.error(f"[{symbol}] Partial close failed: {result.error}")
             
-            # TP3 HIT: Close 35%, SL → TP2 + 0.5R
             elif tp3_hit and partial_state == 2:
-                close_volume = min(tp3_vol, current_volume)
-                if close_volume >= 0.01:
-                    pct_display = int(tp3_pct * 100)
-                    log.info(f"[{symbol}] TP3 HIT ({self.params.atr_tp3_multiplier}R)! Closing {pct_display}% ({close_volume} lots)")
-                    result = self.mt5.partial_close(pos.ticket, close_volume)
-                    if result.success:
-                        log.info(f"[{symbol}] Partial close successful at {result.price}")
-                        setup.partial_closes = 3
-                        self._save_pending_setups()
-                        
-                        # BACKTEST MATCH: SL → TP2 + 0.5R
-                        if setup.direction == "bullish":
-                            new_sl = tp2 + (0.5 * risk)
-                        else:
-                            new_sl = tp2 - (0.5 * risk)
-                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp4 if tp4 else None)
-                        log.info(f"[{symbol}] SL moved to TP2+0.5R ({new_sl:.5f})")
-                    else:
-                        log.error(f"[{symbol}] Partial close failed: {result.error}")
-            
-            # TP4 HIT: Close 10%, SL → TP3 + 0.5R
-            elif tp4_hit and partial_state == 3 and tp4:
-                close_volume = min(tp4_vol, current_volume)
-                if close_volume >= 0.01:
-                    pct_display = int(tp4_pct * 100)
-                    log.info(f"[{symbol}] TP4 HIT ({self.params.atr_tp4_multiplier}R)! Closing {pct_display}% ({close_volume} lots)")
-                    result = self.mt5.partial_close(pos.ticket, close_volume)
-                    if result.success:
-                        log.info(f"[{symbol}] Partial close successful at {result.price}")
-                        setup.partial_closes = 4
-                        self._save_pending_setups()
-                        
-                        # BACKTEST MATCH: SL → TP3 + 0.5R
-                        if setup.direction == "bullish":
-                            new_sl = tp3 + (0.5 * risk)
-                        else:
-                            new_sl = tp3 - (0.5 * risk)
-                        self.mt5.modify_sl_tp(pos.ticket, sl=new_sl, tp=tp5 if tp5 else None)
-                        log.info(f"[{symbol}] SL moved to TP3+0.5R ({new_sl:.5f})")
-                    else:
-                        log.error(f"[{symbol}] Partial close failed: {result.error}")
-            
-            # TP5 HIT: Close remainder (full exit)
-            elif tp5_hit and partial_state == 4 and tp5:
-                log.info(f"[{symbol}] TP5 HIT ({self.params.atr_tp5_multiplier}R)! Closing remainder of position")
+                log.info(f"[{symbol}] TP3 HIT! Closing remainder of position")
                 result = self.mt5.close_position(pos.ticket)
                 if result.success:
-                    log.info(f"[{symbol}] Position fully closed at TP5 ({result.price})")
+                    log.info(f"[{symbol}] Position fully closed at {result.price}")
                     setup.status = "closed"
-                    setup.partial_closes = 5
+                    setup.partial_closes = 3
                     self._save_pending_setups()
                 else:
                     log.error(f"[{symbol}] Failed to close position: {result.error}")
@@ -2153,61 +1699,35 @@ class LiveTradingBot:
     
     def scan_all_symbols(self):
         """
-        Scan all tradable symbols for active signals.
+        Scan all tradable symbols and place pending orders.
         
-        BACKTEST-MATCHED EXECUTION MODEL:
-        - Scans at daily close (22:15 UTC) just like backtest evaluates at bar close
-        - Active signals are added to watching_setups (NOT placed as orders!)
-        - Every 15 min, _check_entry_levels() monitors if price reaches entry
-        - When price reaches entry → MARKET ORDER (matches backtest instant fill)
-        
-        This ensures live trading matches backtest behavior exactly.
+        Uses the same logic as the backtest walk-forward loop.
+        Now places pending limit orders instead of market orders
+        to match backtest entry behavior exactly.
         """
         log.info("=" * 70)
-        log.info(f"DAILY CLOSE SCAN - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+        log.info(f"MARKET SCAN - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
         log.info(f"Strategy Mode: {SIGNAL_MODE} (Min Confluence: {MIN_CONFLUENCE}/7)")
-        log.info(f"⚡ BACKTEST-MATCHED: Signals go to watching_setups, entry on price touch")
+        log.info(f"Using PENDING ORDERS (like backtest)")
         log.info("=" * 70)
         
         self.scan_count += 1
         signals_found = 0
-        setups_added = 0
+        orders_placed = 0
         
         # Only scan symbols that are available on broker
         available_symbols = [s for s in TRADABLE_SYMBOLS if s in self.symbol_map]
         
         for symbol in available_symbols:
             try:
-                # Skip if already watching this symbol
-                if symbol in self.watching_setups:
-                    log.debug(f"[{symbol}] Already in watching_setups, skipping")
-                    continue
-                
-                # Skip if already have a position or pending setup
-                broker_symbol = self.symbol_map.get(symbol)
-                if self.check_existing_position(broker_symbol):
-                    log.debug(f"[{symbol}] Already in position, skipping")
-                    continue
-                
-                if symbol in self.pending_setups:
-                    existing = self.pending_setups[symbol]
-                    if existing.status in ["pending", "filled"]:
-                        log.debug(f"[{symbol}] Already have pending setup, skipping")
-                        continue
                 
                 setup = self.scan_symbol(symbol)
                 
                 if setup:
                     signals_found += 1
                     
-                    # Add to watching_setups instead of placing order immediately
-                    # This matches backtest behavior: signal on bar N, wait for entry touch
-                    setup["created_at"] = datetime.now(timezone.utc).isoformat()
-                    setup["broker_symbol"] = self.symbol_map.get(symbol, symbol)
-                    self.watching_setups[symbol] = setup
-                    setups_added += 1
-                    
-                    log.info(f"[{symbol}] 👁️ Added to watching list: {setup['direction'].upper()} entry @ {setup['entry']:.5f}")
+                    if self.place_setup_order(setup):
+                        orders_placed += 1
                 
                 time.sleep(0.5)
                 
@@ -2216,19 +1736,16 @@ class LiveTradingBot:
                 continue
             time.sleep(0.1)
         
-        # Save watching setups
-        if setups_added > 0:
-            self._save_watching_setups()
-        
         log.info("=" * 70)
         log.info("SCAN COMPLETE")
         log.info(f"  Symbols scanned: {len(available_symbols)}/{len(TRADABLE_SYMBOLS)}")
         log.info(f"  Active signals: {signals_found}")
-        log.info(f"  Added to watching: {setups_added}")
-        log.info(f"  Total watching: {len(self.watching_setups)}")
+        log.info(f"  Pending orders placed: {orders_placed}")
         
         positions = self.mt5.get_my_positions()
+        pending_orders = self.mt5.get_my_pending_orders()
         log.info(f"  Open positions: {len(positions)}")
+        log.info(f"  Pending orders: {len(pending_orders)}")
         log.info(f"  Tracked setups: {len(self.pending_setups)}")
         
         status = self.risk_manager.get_status()
@@ -2239,7 +1756,6 @@ class LiveTradingBot:
         log.info(f"  Max DD: {status['drawdown_pct']:.2f}%/10%")
         log.info(f"  Profitable Days: {status['profitable_days']}/{status['min_profitable_days']}")
         log.info("=" * 70)
-        log.info(f"📊 Next entry check in {self.ENTRY_CHECK_INTERVAL_MINUTES} min")
         
         self.last_scan_time = datetime.now(timezone.utc)
     
@@ -2247,36 +1763,38 @@ class LiveTradingBot:
         """
         Main trading loop - runs 24/7.
         
-        BACKTEST-MATCHED EXECUTION SCHEDULE:
-        - Every 10 seconds: P/L monitoring and protection actions
-        - Every 10 seconds: manage_partial_takes() for partial TP management
-        - Every 15 min: _check_entry_levels() - check if price reached entry for watching setups
-        - Every 10 min: validate_all_setups() to ensure filled positions are tracked
-        - Daily at 22:15 UTC: scan_all_symbols() for new signals → watching_setups
+        Schedule:
+        - Every 30 seconds: execute_protection_actions() (challenge mode) or monitor_live_pnl()
+        - Every 30 seconds: manage_partial_takes() for partial TP management
+        - Every minute: check_pending_orders() and check_position_updates()
+        - Every 15 min: validate_all_setups() to ensure pending orders are still valid
+        - Every 4 hours: scan_all_symbols() for new setups
         
-        This matches backtest behavior:
-        - Backtest generates signals at bar close (22:00 UTC)
-        - Backtest checks if price reaches entry over next 5 bars
-        - Live bot scans at 22:15 UTC, then monitors entry levels every 15 min
+        CHALLENGE MODE ELITE PROTECTION:
+        - Global Risk Controller: Real-time P/L tracking every 30s via execute_protection_actions()
+        - Smart Position Sizing: 0.75% risk per trade, adaptive to DD
+        - Concurrent Trade Limit: Max 5 positions, auto-cancel excess pending
+        - Partial Takes: 45% TP1, 30% TP2, 25% TP3 with BE+buffer (via get_partial_close_volumes)
+        - Emergency Close: 4.5% daily loss or 8% total DD triggers halt
+        - Risk Modes: Aggressive/Normal/Conservative/Ultra-Safe based on DD
+        - Action Types: CLOSE_ALL, CANCEL_PENDING, MOVE_SL_BREAKEVEN, CLOSE_WORST, HALT_TRADING
         """
         log.info("=" * 70)
-        log.info("TRADR BOT - LIVE TRADING (BACKTEST-MATCHED)")
+        log.info("TRADR BOT - LIVE TRADING (FTMO COMPLIANT)")
         if CHALLENGE_MODE:
             log.info("*** CHALLENGE MODE: ELITE PROTECTION ENABLED ***")
         log.info("=" * 70)
         log.info(f"Using SAME strategy as backtests (strategy_core.py)")
-        log.info(f"")
-        log.info(f"⚡ BACKTEST-MATCHED EXECUTION:")
-        log.info(f"  - Daily scan at {self.DAILY_CLOSE_HOUR}:{self.DAILY_CLOSE_DELAY_MINUTES:02d} UTC (signals → watching)")
-        log.info(f"  - Entry check every {self.ENTRY_CHECK_INTERVAL_MINUTES} min (price touch → market order)")
-        log.info(f"  - Setup expiry: {self.SETUP_EXPIRY_DAYS} days (like backtest 5-bar wait)")
-        log.info(f"")
         log.info(f"FTMO Risk Limits:")
         log.info(f"  - Max single trade risk: 0.75% (Challenge Mode)")
         log.info(f"  - Max cumulative risk: {FIVEERS_CONFIG.max_cumulative_risk_pct}%")
         log.info(f"  - Emergency close at: 4.5% daily loss / 8% drawdown")
+        log.info(f"  - Partial TPs: 45% TP1, 30% TP2, 25% TP3 (Challenge Mode)")
         log.info(f"Server: {MT5_SERVER}")
         log.info(f"Login: {MT5_LOGIN}")
+        log.info(f"Scan Interval: {SCAN_INTERVAL_HOURS} hours")
+        log.info(f"Validate Interval: {self.VALIDATE_INTERVAL_MINUTES} minutes")
+        log.info(f"P/L Monitor Interval: {self.MAIN_LOOP_INTERVAL_SECONDS} seconds (elite protection)")
         log.info(f"Strategy Mode: {SIGNAL_MODE}")
         log.info(f"Min Confluence: {MIN_CONFLUENCE}/7")
         log.info(f"Symbols: {len(TRADABLE_SYMBOLS)}")
@@ -2291,25 +1809,8 @@ class LiveTradingBot:
         
         global running
         
-        # Check if we should do initial scan
-        now = datetime.now(timezone.utc)
-        next_scan_time = self._get_next_scan_time()
-        
-        # If within 1 hour of next scan time, just wait
-        hours_until_scan = (next_scan_time - now).total_seconds() / 3600
-        if hours_until_scan < 1:
-            log.info(f"📅 Next daily scan in {hours_until_scan*60:.0f} minutes - waiting")
-        elif hours_until_scan > 20:  
-            # Just started and next scan is tomorrow - we missed today's scan, do one now
-            log.info("📅 Startup scan: checking for existing setups from last daily close")
-            self.scan_all_symbols()
-            # Mark that we did an initial scan (not a daily close scan)
-            log.info(f"📅 Next scheduled daily scan: {next_scan_time.strftime('%Y-%m-%d %H:%M')} UTC")
-        else:
-            log.info(f"📅 Next daily scan at: {next_scan_time.strftime('%Y-%m-%d %H:%M')} UTC ({hours_until_scan:.1f}h)")
-        
+        self.scan_all_symbols()
         self.last_validate_time = datetime.now(timezone.utc)
-        self.last_entry_check_time = datetime.now(timezone.utc)
         last_protection_check = datetime.now(timezone.utc)
         emergency_triggered = False
         
@@ -2346,28 +1847,15 @@ class LiveTradingBot:
                 self.check_pending_orders()
                 self.check_position_updates()
                 
-                # Check entry levels every 15 min (BACKTEST-MATCHED)
-                # This is where price touch → market order happens
-                if self.last_entry_check_time:
-                    next_entry_check = self.last_entry_check_time + timedelta(minutes=self.ENTRY_CHECK_INTERVAL_MINUTES)
-                    if now >= next_entry_check:
-                        self._check_entry_levels()
-                        self.last_entry_check_time = now
-                
-                # Validate existing filled setups every 10 min
                 if self.last_validate_time:
                     next_validate = self.last_validate_time + timedelta(minutes=self.VALIDATE_INTERVAL_MINUTES)
                     if now >= next_validate:
                         self.validate_all_setups()
-                        self.last_validate_time = now
                 
-                # Daily close scan at 22:15 UTC (ONCE per day)
-                if self._is_daily_close_scan_time():
-                    log.info("🔔 DAILY CLOSE SCAN - Scanning all symbols for new setups")
-                    self.scan_all_symbols()
-                    self.last_daily_scan_date = now.date()
-                    next_scan = self._get_next_scan_time()
-                    log.info(f"Next daily scan: {next_scan.strftime('%Y-%m-%d %H:%M')} UTC")
+                if self.last_scan_time:
+                    next_scan = self.last_scan_time + timedelta(hours=SCAN_INTERVAL_HOURS)
+                    if now >= next_scan:
+                        self.scan_all_symbols()
                 
                 if not self.mt5.connected:
                     log.warning("MT5 connection lost, attempting reconnect...")
@@ -2391,7 +1879,6 @@ class LiveTradingBot:
         log.info("Shutting down...")
         
         self._save_pending_setups()
-        self._save_watching_setups()  # Save setups waiting for price touch
         self.disconnect()
         log.info("Bot stopped")
 

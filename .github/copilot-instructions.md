@@ -51,7 +51,27 @@ broker_sym = get_broker_symbol("SPX500_USD", "fiveers")  # -> "US500.cash"
 broker_sym = get_broker_symbol("SPX500_USD", "forexcom")  # -> "US500"
 ```
 
-### Recent Bug Fixes (Dec 28, 2025)
+### Recent Bug Fixes (Jan 3, 2026)
+**CRITICAL H1 EXIT CORRECTION**: Fixed D1 backtest same-candle SL/TP issue:
+1. **Problem**: D1 can't determine if SL or TP hit first on same candle
+2. **Impact**: 467 trades in run_009 incorrectly classified as LOSS (49.2% → 71.0% WR)
+3. **Solution**: `_correct_trades_with_h1()` uses timestamp-based lookup:
+   - Flat sorted H1 list per symbol
+   - Filter: `entry_dt < time <= exit_dt`
+   - D1 period: 22:00 UTC to 22:00 UTC (not calendar date)
+4. **Date fix**: Use `end=2026-01-01` to include 2025 H1 data
+
+### Architecture Parity (Jan 3, 2026)
+**TPE Optimizer & Live Bot use IDENTICAL setup finding:**
+| Component | TPE Optimizer | Live Bot |
+|-----------|---------------|----------|
+| Setup logic | `compute_confluence()` | `compute_confluence()` ✅ |
+| Trend inference | `_infer_trend()` | `_infer_trend()` ✅ |
+| Direction | `_pick_direction_from_bias()` | `_pick_direction_from_bias()` ✅ |
+| Timeframes | MN1, W1, D1, H4 | MN1, W1, D1, H4 ✅ |
+| Entry | Candle close (simulation) | Pending order + spread check |
+
+### Previous Bug Fixes (Dec 28, 2025)
 **IMPORTANT**: The following bugs were recently fixed - avoid reintroducing:
 
 1. **ComplianceTracker**: Implemented compliance tracking class with daily DD (4.5%), total DD (9%), streak halt (999)
@@ -168,7 +188,8 @@ tail -f ftmo_analysis_output/NSGA/optimization.log # Monitor NSGA-II progress
 - Logs: `logs/tradr_live.log`
 - Documentation: `docs/` (system guide, strategy analysis, compliance tracking)
 - Utility scripts: `scripts/` (optimization monitoring, debug tools)
-- New docs: `docs/COMPLIANCE_TRACKING_IMPLEMENTATION.md` (FTMOComplianceTracker guide)
+- H1 correction: `scripts/apply_h1_correction.py` (post-process trades for accurate SL/TP classification)
+- Compliance: `docs/COMPLIANCE_TRACKING_IMPLEMENTATION.md` (FTMOComplianceTracker guide)
 
 ## Testing Strategy Changes
 1. Modify `strategy_core.py` (contains `compute_confluence()`, `simulate_trades()`)

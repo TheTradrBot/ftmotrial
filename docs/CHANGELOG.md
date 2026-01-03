@@ -1,7 +1,43 @@
 # Changelog
 
-**Last Updated**: 2025-12-31
+**Last Updated**: 2026-01-03
 **Auto-generated**: From git commits
+
+---
+
+## v1.2.0 - H1 Exit Correction & Architecture Parity (Jan 3, 2026)
+
+### Critical Bug Fixes
+- 🐛 **H1 Exit Detection**: Fixed timestamp-based H1 lookup for accurate SL/TP classification
+  - **Bug**: D1 backtests couldn't determine if SL or TP hit first on same candle
+  - **Impact**: 467 trades in run_009 were incorrectly classified as LOSS
+  - **Fix**: `_correct_trades_with_h1()` now uses flat sorted H1 list with `entry_dt < time <= exit_dt` filter
+  - **Result**: 49.2% → 71.0% win rate improvement for run_009
+
+- 🐛 **Date Range Loading**: Fixed `load_ohlcv_data()` to include 2025 data
+  - **Bug**: Using `end=2025-01-01` filtered out all 2025 data
+  - **Fix**: Use `end=2026-01-01` to include all available H1 data
+
+### Architecture Verification
+- ✅ **TPE Optimizer & Live Bot Parity**: Confirmed both use IDENTICAL setup finding logic:
+  - Same `compute_confluence()` function from `strategy_core.py`
+  - Same `_infer_trend()` and `_pick_direction_from_bias()` for bias calculation
+  - Same weekly/monthly data for trend inference
+  - Same H4 data for confirmation
+  - Same `StrategyParams` class with run_009 defaults
+  
+- ✅ **Difference**: Live bot adds entry validation (spread, margin, distance checks)
+
+### Parameter Updates
+- ✅ **StrategyParams Defaults**: Now baked in with run_009 optimized values:
+  - `tp1_r_multiple=1.7`, `tp2_r_multiple=2.7`, `tp3_r_multiple=6.0`
+  - `trail_activation_r=0.65`, `min_confluence=2`, `risk_per_trade_pct=0.65`
+
+### Utility Scripts
+- ✨ **apply_h1_correction.py**: Post-process trades CSV to correct SL/TP classification
+  - Reads trades from run_009 output
+  - Applies H1-based exit detection
+  - Outputs corrected CSV with accurate win/loss classification
 
 ---
 

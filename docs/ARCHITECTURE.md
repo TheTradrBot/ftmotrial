@@ -1,7 +1,7 @@
 # MT5 5ers Trading Bot - Complete System Architecture
 
-**Last Updated**: 2025-12-31  
-**Version**: 4.0 (Live Bot Synced with TPE Optimizer + Multi-Broker Support)
+**Last Updated**: 2026-01-03  
+**Version**: 4.1 (H1 Exit Correction + Architecture Parity Verified)
 
 ---
 
@@ -9,13 +9,14 @@
 1. [System Overview](#system-overview)
 2. [Component Architecture](#component-architecture)
 3. [Data Flow](#data-flow)
-4. [Optimization System](#optimization-system)
-5. [Live Bot Features (Dec 2025)](#live-bot-features-dec-2025)
-6. [Parameter Management](#parameter-management)
-7. [Risk Management](#risk-management)
-8. [Multi-Broker Support](#multi-broker-support)
-9. [Output Management](#output-management)
-10. [Deployment Architecture](#deployment-architecture)
+4. [H1 Exit Correction](#h1-exit-correction)
+5. [Optimization System](#optimization-system)
+6. [Live Bot Features (Dec 2025)](#live-bot-features-dec-2025)
+7. [Parameter Management](#parameter-management)
+8. [Risk Management](#risk-management)
+9. [Multi-Broker Support](#multi-broker-support)
+10. [Output Management](#output-management)
+11. [Deployment Architecture](#deployment-architecture)
 
 ---
 
@@ -196,6 +197,39 @@ Every 10 minutes:
     │   └── If expired (12h) → Remove
     └── Save updated awaiting_spread.json
 ```
+
+---
+
+## H1 Exit Correction
+
+### Problem Statement
+D1 backtests cannot determine if SL or TP hit first when both are breached on the same daily candle. This led to 467 trades in run_009 being incorrectly classified as LOSS.
+
+### Solution: Timestamp-Based H1 Lookup
+```python
+# In strategy_core.py _correct_trades_with_h1()
+# Filter H1 candles to the trade's exit window
+for candle in h1_candles:
+    if entry_dt < candle['time'] <= exit_dt:
+        # Check if TP1 hit before SL
+        if candle['high'] >= tp1:
+            return True  # Trade is actually a WIN
+        if candle['low'] <= sl:
+            return False  # Trade is correctly a LOSS
+```
+
+### Key Implementation Details
+1. **Flat sorted H1 list**: Pre-sort by timestamp for efficient lookup
+2. **Entry-based filter**: `entry_dt < time <= exit_dt` (exclusive of entry time)
+3. **D1 candle period**: 22:00 UTC to 22:00 UTC next day (not calendar date)
+4. **Date range fix**: Use `end=2026-01-01` to include 2025 H1 data
+
+### Impact
+| Metric | Before H1 Correction | After H1 Correction |
+|--------|---------------------|--------------------|
+| Win Rate (run_009) | 49.2% | 71.0% |
+| Trades Corrected | 0 | 467 |
+| Current Simulation | 42.8% | 45.1% (4 corrections) |
 
 ---
 

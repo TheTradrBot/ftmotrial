@@ -2,127 +2,143 @@
 
 Automated MetaTrader 5 trading bot for **5ers 60K High Stakes** Challenge accounts. Uses a 6-Pillar Confluence system with multi-timeframe analysis. Validated on 12 years (2014-2025) and production-ready.
 
+## 🏗️ Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    AUDITABLE PARAMETER FLOW                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ftmo_challenge_analyzer.py        ← Optuna Optimization               │
+│            │                                                            │
+│            ▼                                                            │
+│   ftmo_analysis_output/TPE/best_params.json                             │
+│            │                                                            │
+│            ▼  (Manual Review Required)                                  │
+│   python -m params.promote_to_production                                │
+│            │                                                            │
+│            ▼                                                            │
+│   params/PRODUCTION_PARAMS.json     ← LOCKED (full audit trail)         │
+│            │                                                            │
+│            ▼                                                            │
+│   main_live_bot.py                  ← Verifies + loads production       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
 ## Quick Start
 
+### 1. Run Optimization
+
 ```bash
-# Run optimization (recommended: use helper script for background runs)
-./run_optimization.sh --single --trials 100  # TPE (auto-logs to ftmo_analysis_output/TPE/run.log)
-./run_optimization.sh --multi --trials 100   # NSGA-II (auto-logs to ftmo_analysis_output/NSGA/run.log)
+./run_optimization.sh --single --trials 100  # TPE (recommended)
+./run_optimization.sh --multi --trials 100   # NSGA-II multi-objective
 
-# Or run directly
-python ftmo_challenge_analyzer.py --single --trials 100  # TPE single-objective (recommended)
-python ftmo_challenge_analyzer.py --multi --trials 100   # NSGA-II multi-objective
+# Monitor progress
+tail -f ftmo_analysis_output/TPE/optimization.log
+```
 
-# Monitor live progress
-tail -f ftmo_analysis_output/TPE/run.log          # Complete output
-tail -f ftmo_analysis_output/TPE/optimization.log # Trial results only
+### 2. Promote to Production (After Review)
 
-# Check optimization status
-python ftmo_challenge_analyzer.py --status
+```bash
+# Interactive promotion
+python -m params.promote_to_production
 
-# Show current configuration
-python ftmo_challenge_analyzer.py --config
+# Verify production params
+python -m params.promote_to_production --verify
+```
 
-# Run live bot (Windows VM with MT5)
+### 3. Audit Production Readiness
+
+```bash
+python scripts/audit_production.py --verbose
+```
+
+### 4. Run Live Bot (Windows VM)
+
+```bash
 python main_live_bot.py
 ```
 
-## Final Results (Dec 31, 2025)
+## 📁 Project Structure
 
-### 12-Year Robustness (2014-2025)
-| Period | Total R | Profit (60K) | Win Rate |
-|--------|---------|--------------|----------|
-| 2014-2016 | +672.7R | $242,166 | 48.7% |
-| 2017-2019 | +679.2R | $244,500 | 48.7% |
-| 2020-2022 | +662.4R | $238,476 | 48.3% |
-| 2023-2025 | +752.0R | $270,720 | 48.8% |
-| **Total** | **+2,766.3R** | **$995,862** | **~48.6%** |
+```
+ftmotrial/
+├── main_live_bot.py              # Live MT5 bot (Windows VM)
+├── ftmo_challenge_analyzer.py    # Optuna optimization engine
+├── strategy_core.py              # Trading strategy (6 Confluence Pillars)
+│
+├── params/                       # PARAMETER MANAGEMENT
+│   ├── PRODUCTION_PARAMS.json    # 🔒 LOCKED production params (auditable)
+│   ├── current_params.json       # Latest optimization output
+│   ├── params_loader.py          # Parameter loading logic
+│   ├── promote_to_production.py  # CLI to promote params to production
+│   └── history/                  # Backup of all param changes
+│
+├── ftmo_analysis_output/         # OPTIMIZATION RESULTS
+│   ├── TPE/                      # TPE results (best_params.json, trades, report)
+│   ├── NSGA/                     # NSGA-II multi-objective results
+│   └── VALIDATE/                 # Validation on different periods
+│
+├── scripts/                      # UTILITIES
+│   ├── audit_production.py       # 🔍 Production readiness audit
+│   └── monitor_optimization.sh   # Monitor running optimization
+│
+├── docs/                         # DOCUMENTATION
+└── data/ohlcv/                   # Historical OHLCV data (2003-2025)
+```
 
-### 5ers Challenge Speed (60K account)
-- Step 1 (8% target = $4,800): ~18 dagen
-- Step 2 (5% target = $3,000): ~10 dagen
-- **Totaal**: ~28 dagen
+## 🔐 Parameter Management
 
-### Compliance Metrics
-- Max daily DD <3.8% (limit 5%)
-- Max total DD <3% (limit 10%)
-- Risk per trade: 0.6% = $360 per R
-- Min profitable days: 3 (5ers requirement)
+### Production Parameters (params/PRODUCTION_PARAMS.json)
 
-## Latest Updates (Dec 31, 2025)
+Contains full audit trail:
+- **source**: Which optimization run (TPE/NSGA, timestamp, score)
+- **validation**: Sharpe ratio, win rate, approval status
+- **parameters**: Locked strategy parameters
+- **checksum**: SHA256 hash for integrity
 
-### Live Bot Enhancements
-- ✨ **Daily Close Scanning**: Scan only at 22:05 UTC (after NY close) - matches backtest exactly
-- ✨ **Spread-Only Entry Filter**: No session filter, just check spread quality
-- ✨ **Spread Monitoring**: Every 10 min, check if spread improved for pending signals
-- ✨ **Signal Expiry**: Signals expire after 12 hours if spread never improves
-- ✨ **3-Tier Graduated Risk**: 2% DD → reduce risk, 3.5% → cancel pending, 4.5% → emergency close
+### Deployment Workflow
 
-### Live Bot Synced with TPE Optimizer
-- ✅ **Quality Factors**: Now uses `max(1, confluence_score // 3)` (identical to backtest)
-- ✅ **Volatile Asset Boost**: Applied for XAU_USD, NAS100_USD, GBP_JPY, BTC_USD
-- ✅ **Active Status Check**: Uses boosted scores with `min_quality_for_active = max(1, min_quality_factors - 1)`
+1. **Optimize** → `python ftmo_challenge_analyzer.py`
+2. **Review** → Check `professional_backtest_report.txt`
+3. **Promote** → `python -m params.promote_to_production`
+4. **Approve** → Set `approved: true` in PRODUCTION_PARAMS.json
+5. **Audit** → `python scripts/audit_production.py`
+6. **Deploy** → Pull on Windows VM, restart bot
 
-### Multi-Broker Support
-- ✨ **Forex.com Demo** ($50K): For testing before 5ers live
-- ✨ **5ers Live** ($60K): Production trading
-- ✨ **Symbol Mapping**: Automatic conversion (SPX500_USD → SPX500 for Forex.com)
+## 📊 Latest Results (Jan 2, 2026)
 
-### Previous Updates (Dec 28-30, 2025)
-- ✅ **Validation Mode**: Test parameters on different date ranges
-- ✅ **Parameter saving fix**: ALL 30+ Optuna parameters now saved correctly
-- ✅ **12-year validation**: Confirmed robustness across 2014-2025
-- ✅ **NSGA-II directories**: Separate output for multi-objective runs
+### TPE Optimization (Production)
+
+| Metric | Training | Validation | Full |
+|--------|----------|------------|------|
+| Sharpe Ratio | 2.92 | 4.76 | 3.53 |
+| Total Return | $132,740 | $118,248 | $248,551 |
+| Win Rate | 47.4% | 52.8% | 49.2% |
+| Max Drawdown | $9,848 | $7,535 | $9,848 |
+
+### 5ers Challenge Projections
+- Step 1 (8% = $4,800): ~18 days
+- Step 2 (5% = $3,000): ~10 days
+
+## 🛡️ Risk Management
+
+- Max daily loss: **5%** (halt at 4.2%)
+- Max total drawdown: **10%** (emergency at 7%)
+- Risk per trade: 0.65% = $390 per R
+- Graduated risk tiers at 2%, 3.5%, 4.5% DD
+
+## 📚 Documentation
+
+| Document | Description |
+|----------|-------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture |
+| [docs/PARAMETER_DEPLOYMENT.md](docs/PARAMETER_DEPLOYMENT.md) | Parameter deployment guide |
+| [docs/AUDIT_PROCEDURES.md](docs/AUDIT_PROCEDURES.md) | Audit procedures |
+| [docs/STRATEGY_GUIDE.md](docs/STRATEGY_GUIDE.md) | Strategy deep dive |
+| [.github/copilot-instructions.md](.github/copilot-instructions.md) | AI context |
 
 ---
 
-## Project Structure
-
-```
-├── strategy_core.py          # Core trading logic (6 Confluence Pillars)
-├── ftmo_challenge_analyzer.py # Optuna optimization & backtesting
-├── main_live_bot.py          # Live MT5 trading entry point
-├── broker_config.py          # Multi-broker configuration (Forex.com, 5ers)
-├── symbol_mapping.py         # Symbol conversion (OANDA ↔ broker format)
-├── config.py                 # Account settings, CONTRACT_SPECS
-├── ftmo_config.py            # 5ers challenge rules & risk limits
-├── docs/                     # Documentation (system guide, strategy analysis)
-├── scripts/                  # Utility scripts (monitoring, debugging)
-├── params/                   # Optimized parameters (current_params.json)
-└── data/ohlcv/               # Historical OHLCV data (2003-2025)
-```
-
-## Optimization & Backtesting
-
-The optimizer uses professional quant best practices:
-
-- **TRAINING PERIOD**: January 1, 2024 – September 30, 2024 (in-sample optimization)
-- **VALIDATION PERIOD**: October 1, 2024 – December 31, 2024 (out-of-sample test)
-- **FINAL BACKTEST**: Full year 2024 (December fully open for trading)
-- **ADX > 25 trend-strength filter** applied to avoid ranging markets.
-
-All trades from the final backtest are exported to:
-`ftmo_analysis_output/all_trades_2024_full.csv`
-
-Parameters are saved to `params/current_params.json`
-
-Optimization is resumable and can be checked with: `python ftmo_challenge_analyzer.py --status`
-
-
-## Documentation
-
-### Core Documentation
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Complete system architecture & data flow
-- **[STRATEGY_GUIDE.md](docs/STRATEGY_GUIDE.md)** - Trading strategy deep dive with current parameters
-- **[API_REFERENCE.md](docs/API_REFERENCE.md)** - Complete API documentation for all modules
-- **[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)** - Installation, deployment & troubleshooting
-- **[OPTIMIZATION_FLOW.md](docs/OPTIMIZATION_FLOW.md)** - 4-phase optimization process
-- **[BASELINE_ANALYSIS.md](docs/BASELINE_ANALYSIS.md)** - Comprehensive performance analysis & roadmap
-- **[CHANGELOG.md](docs/CHANGELOG.md)** - Version history & recent changes
-
-### Quick References
-- **[.github/copilot-instructions.md](.github/copilot-instructions.md)** - AI assistant context & commands
-
----
-
-**Last Documentation Update**: 2025-12-31
+**Last Updated**: January 2, 2026

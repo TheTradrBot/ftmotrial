@@ -1,0 +1,13 @@
+{
+  "initial_balance": 60000.0,
+  "stop_out_level": 54000.0,
+  "original_profit": 248587.53,
+  "protected_profit": 223687.72046883556,
+  "profit_difference": -24899.809531164443,
+  "protective_close_events": 10,
+  "trades_force_closed": 364,
+  "total_dd_breaches": 0,
+  "daily_dd_breaches": 0,
+  "days_analyzed": 1081,
+  "worst_daily_dd_pct": 11.274328951005947
+}

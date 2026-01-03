@@ -1,0 +1,13 @@
+{
+  "account_terminated": true,
+  "initial_balance": 60000.0,
+  "final_balance": 174141.90000000029,
+  "live_profit": 114141.90000000029,
+  "backtest_profit": 248587.52999999997,
+  "profit_difference": -134445.62999999968,
+  "signals_total": 2008,
+  "trades_executed": 2008,
+  "breach_events": 1,
+  "days_analyzed": 1081,
+  "worst_daily_dd_pct": 5.184103521782659
+}

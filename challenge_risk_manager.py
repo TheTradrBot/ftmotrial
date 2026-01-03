@@ -68,14 +68,14 @@ class ChallengeConfig:
     tp2_close_pct: float = 0.30
     tp3_close_pct: float = 0.25
     
-    # Daily loss thresholds
+    # Daily loss thresholds (optimizer: 4.1%)
     daily_loss_warning_pct: float = 2.5
     daily_loss_reduce_pct: float = 3.5
-    daily_loss_halt_pct: float = 4.2
+    daily_loss_halt_pct: float = 4.1  # Optimizer value (was 4.2)
     
-    # Total drawdown thresholds
+    # Total drawdown thresholds (optimizer: 7.9%)
     total_dd_warning_pct: float = 5.0
-    total_dd_emergency_pct: float = 7.0
+    total_dd_emergency_pct: float = 7.9  # Optimizer value (was 7.0)
     
     # Protection settings
     protection_loop_interval_sec: float = 30.0
@@ -123,6 +123,7 @@ class ChallengeRiskManager:
         self.current_equity: float = config.account_size
         
         self.day_start_balance: float = config.account_size
+        self.yesterday_high: float = config.account_size  # 5ers: max(balance, equity) van vorige dag
         self.daily_pnl: float = 0.0
         self.total_drawdown: float = 0.0
         self.total_drawdown_pct: float = 0.0
@@ -147,6 +148,7 @@ class ChallengeRiskManager:
                 self.starting_balance = state.get('starting_balance', self.config.account_size)
                 self.peak_equity = state.get('peak_equity', self.config.account_size)
                 self.day_start_balance = state.get('day_start_balance', self.config.account_size)
+                self.yesterday_high = state.get('yesterday_high', self.config.account_size)
                 self.trades_today = state.get('trades_today', 0)
                 
                 saved_date = state.get('current_date')
@@ -163,6 +165,7 @@ class ChallengeRiskManager:
             'starting_balance': self.starting_balance,
             'peak_equity': self.peak_equity,
             'day_start_balance': self.day_start_balance,
+            'yesterday_high': self.yesterday_high,
             'current_date': self.current_date.isoformat(),
             'trades_today': self.trades_today,
             'last_update': datetime.now().isoformat()
@@ -183,25 +186,44 @@ class ChallengeRiskManager:
         # Check for new day
         if today != self.current_date:
             log.info(f"New trading day detected: {today}")
+            # 5ers regel: yesterday_high = max(balance, equity) van einde vorige dag
+            self.yesterday_high = max(self.current_balance, self.current_equity)
             self.day_start_balance = balance
             self.trades_today = 0
             self.current_date = today
+            log.info(f"Yesterday high (max of balance/equity): ${self.yesterday_high:,.2f}")
         
         # Update current state
         self.current_balance = balance
         self.current_equity = equity
         
-        # Update peak equity (high water mark)
+        # Update peak equity (only for info/logging)
         if equity > self.peak_equity:
             self.peak_equity = equity
             log.info(f"New peak equity: ${self.peak_equity:,.2f}")
         
-        # Calculate metrics
-        self.daily_pnl = balance - self.day_start_balance
-        self.daily_loss_pct = abs(min(0, self.daily_pnl)) / self.day_start_balance * 100
+        # === 5ERS RULES IMPLEMENTATION ===
+        # Daily DD: Max 5% van HOOGSTE WAARDE VORIGE DAG
+        # Basis = max(balance, equity) einde vorige dag
+        # Reset elke dag om 00:00 MT5 time
+        daily_drop = max(0, self.yesterday_high - equity)
+        if self.yesterday_high > 0:
+            self.daily_loss_pct = (daily_drop / self.yesterday_high) * 100
+        else:
+            self.daily_loss_pct = 0.0
         
-        self.total_drawdown = self.peak_equity - equity
-        self.total_drawdown_pct = self.total_drawdown / self.peak_equity * 100 if self.peak_equity > 0 else 0
+        # Total DD: Max 10% van INITIAL balance (ABSOLUTE, groeit NIET mee)
+        # Stop-out = vast op $54K voor $60K account
+        if self.starting_balance > 0:
+            total_drop = max(0, self.starting_balance - equity)
+            self.total_drawdown = total_drop
+            self.total_drawdown_pct = (total_drop / self.starting_balance) * 100
+        else:
+            self.total_drawdown = 0.0
+            self.total_drawdown_pct = 0.0
+        
+        # Daily P&L for logging
+        self.daily_pnl = balance - self.day_start_balance
         
         # Determine risk mode
         self._update_risk_mode()
