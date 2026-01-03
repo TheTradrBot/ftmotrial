@@ -5,6 +5,33 @@
 
 ---
 
+## v1.2.1 - Explicit Disabled Parameters Fix (Jan 3, 2026)
+
+### Critical Parameter Fixes
+- 🐛 **Missing Disabled Parameters**: Fixed parameters not being passed to main_live_bot
+  - **Bug**: `use_session_filter`, `use_graduated_risk`, `use_atr_trailing` had `default=True` but were NOT in JSON
+  - **Impact**: Live bot would enable filters that run_009 had DISABLED
+  - **Fix**: All disabled parameters now EXPLICIT in all param files
+
+### Parameter File Updates
+- ✅ **PRODUCTION_PARAMS.json**: Added 6 missing disabled parameters
+- ✅ **current_params.json**: Added 6 missing disabled parameters  
+- ✅ **validation_params.json**: Added 6 missing disabled parameters
+- ✅ **run_009/best_params.json**: Added 6 missing disabled parameters
+
+### Default Value Corrections
+- ✅ **StrategyParams**: Changed defaults to match run_009 baseline:
+  - `use_session_filter: False` (was True)
+  - `use_graduated_risk: False` (was True)
+  - `use_atr_trailing: False` (was True)
+- ✅ **run_full_period_backtest()**: Same default changes for consistency
+
+### Documentation Updates
+- ✅ **copilot-instructions.md**: Added explicit list of disabled parameters
+- ✅ **CHANGELOG.md**: Documented this fix
+
+---
+
 ## v1.2.0 - H1 Exit Correction & Architecture Parity (Jan 3, 2026)
 
 ### Critical Bug Fixes

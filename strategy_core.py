@@ -227,7 +227,6 @@ class StrategyParams:
     # Additional Strategy-Level Toggles
     use_fib_0786_only: bool = False  # True: require 0.786 zone only; False: allow broader 0.618-0.886
     use_market_structure_bos_only: bool = False  # True: require BOS only; False: allow BOS or CHoCH
-    use_atr_trailing: bool = True  # Enable ATR trailing on runner
     use_volatility_sizing_boost: bool = False  # Increase risk % in high ATR periods
     
     # Categorical/Other Parameters
@@ -238,19 +237,23 @@ class StrategyParams:
     # ============================================================================
     # SESSION FILTER & GRADUATED RISK MANAGEMENT
     # These control trading hours and position sizing during drawdowns
+    # DEFAULTS: All disabled to match run_009 baseline
     # ============================================================================
     
     # Session Filter: Only trade during London/NY hours
-    use_session_filter: bool = True  # True = skip Asian session (22:00-08:00 UTC)
+    use_session_filter: bool = False  # DISABLED: Asian session trading allowed (run_009)
     session_start_utc: int = 8  # London open
     session_end_utc: int = 22  # NY close
     
     # Graduated Risk Management (3-tier system)
-    use_graduated_risk: bool = True  # Enable/disable graduated risk management
+    use_graduated_risk: bool = False  # DISABLED: Fixed risk per trade (run_009)
     tier1_dd_pct: float = 2.0  # Tier 1: Reduce risk at this daily DD%
     tier1_risk_factor: float = 0.67  # Risk multiplier (0.6% -> 0.4%)
     tier2_dd_pct: float = 3.5  # Tier 2: Cancel pending at this daily DD%
     tier3_dd_pct: float = 4.5  # Tier 3: Emergency close at this daily DD%
+    
+    # ATR Trailing Stop
+    use_atr_trailing: bool = False  # DISABLED: No trailing stops (run_009)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary."""

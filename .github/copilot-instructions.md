@@ -61,6 +61,30 @@ broker_sym = get_broker_symbol("SPX500_USD", "forexcom")  # -> "US500"
    - D1 period: 22:00 UTC to 22:00 UTC (not calendar date)
 4. **Date fix**: Use `end=2026-01-01` to include 2025 H1 data
 
+**CRITICAL PARAM FIX**: All disabled filters now EXPLICIT in JSON:
+- Parameters missing from JSON used StrategyParams defaults (some True!)
+- Fixed: All `use_*_filter` params now explicit in all param files
+- Key disabled filters: `use_session_filter`, `use_graduated_risk`, `use_atr_trailing`
+
+### Run_009 Disabled Parameters (Baseline)
+**IMPORTANT**: Run_009 has ALL indicator/regime filters DISABLED. When creating new param files, ALWAYS include these with `false`:
+```json
+{
+  "use_htf_filter": false,
+  "use_structure_filter": false,
+  "use_confirmation_filter": false,
+  "use_fib_filter": false,
+  "use_displacement_filter": false,
+  "use_candle_rejection": false,
+  "use_adx_regime_filter": false,
+  "use_adx_slope_rising": false,
+  "use_atr_regime_filter": false,
+  "use_session_filter": false,
+  "use_graduated_risk": false,
+  "use_atr_trailing": false
+}
+```
+
 ### Architecture Parity (Jan 3, 2026)
 **TPE Optimizer & Live Bot use IDENTICAL setup finding:**
 | Component | TPE Optimizer | Live Bot |

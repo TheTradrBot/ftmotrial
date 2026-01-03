@@ -72,13 +72,23 @@
     "tp2_close_pct": 0.16,
     "tp3_close_pct": 0.35,
     
-    "_FILTERS_DISABLED_": "=== All Filters Disabled for Baseline ===",
+    "_FILTERS_DISABLED_": "=== All Indicator Filters Disabled for Baseline ===",
     "use_htf_filter": false,
     "use_structure_filter": false,
     "use_confirmation_filter": false,
     "use_fib_filter": false,
     "use_displacement_filter": false,
-    "use_candle_rejection": false
+    "use_candle_rejection": false,
+    
+    "_REGIME_FILTERS_DISABLED_": "=== Regime Detection Filters - DISABLED ===",
+    "use_adx_regime_filter": false,
+    "use_adx_slope_rising": false,
+    "use_atr_regime_filter": false,
+    
+    "_SESSION_RISK_DISABLED_": "=== Session/Risk Management Filters - DISABLED ===",
+    "use_session_filter": false,
+    "use_graduated_risk": false,
+    "use_atr_trailing": false
   },
 
   "checksum": {
