@@ -1694,6 +1694,7 @@ class OptunaOptimizer:
             require_adx_filter=True,
             min_adx=25.0,
             use_adx_regime_filter=False,  # DISABLED: ADX regime filtering disabled for now
+            use_adx_slope_rising=False,  # DISABLED: ADX slope rising disabled for now
             adx_trend_threshold=params['adx_trend_threshold'],
             adx_range_threshold=params['adx_range_threshold'],
             trend_min_confluence=params['trend_min_confluence'],
@@ -1719,6 +1720,9 @@ class OptunaOptimizer:
             daily_loss_halt_pct=params['daily_loss_halt_pct'],
             max_total_dd_warning=params['max_total_dd_warning'],
             consecutive_loss_halt=params['consecutive_loss_halt'],
+            # CRITICAL: Disabled filter parameters - FALSE overrides defaults
+            use_session_filter=False,  # DISABLED: Asian session trading allowed
+            use_graduated_risk=False,  # DISABLED: Fixed risk per trade
         )
         
         if not training_trades or len(training_trades) == 0:
@@ -2369,6 +2373,7 @@ def validate_top_trials(study, top_n: int = 5) -> List[Dict]:
             ml_min_prob=None,
             require_adx_filter=True,
             use_adx_regime_filter=False,
+            use_adx_slope_rising=False,  # DISABLED: ADX slope rising disabled
             adx_trend_threshold=params.get('adx_trend_threshold', 25.0),
             adx_range_threshold=params.get('adx_range_threshold', 20.0),
             trend_min_confluence=params.get('trend_min_confluence', 6),
@@ -2395,6 +2400,9 @@ def validate_top_trials(study, top_n: int = 5) -> List[Dict]:
             daily_loss_halt_pct=params.get('daily_loss_halt_pct', 4.0),
             max_total_dd_warning=params.get('max_total_dd_warning', 8.0),
             consecutive_loss_halt=params.get('consecutive_loss_halt', 999),
+            # CRITICAL: Disabled filter parameters - FALSE overrides defaults
+            use_session_filter=False,  # DISABLED: Asian session trading allowed
+            use_graduated_risk=False,  # DISABLED: Fixed risk per trade
         )
         
         # Calculate validation metrics
